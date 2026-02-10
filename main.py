@@ -6,6 +6,7 @@ ZERO BUGS GUARANTEE: Orchestrates all modules with error handling
 
 import sys
 import os
+import time
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -186,7 +187,7 @@ def mode_create_new():
                 continue
 
             # Run createinstallmedia
-            start_time = __import__('time').time()
+            start_time = time.time()
 
             success = installer_runner.run_createinstallmedia(
                 inst['path'],
