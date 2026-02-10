@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import privilege, constants
 from detection import installer_scanner, stub_validator, disk_detector
 from safety import boot_disk_guard, backup_manager
-from operations import partitioner, installer_runner, branding
+from operations import partitioner, installer_runner, branding, updater
 from integration import mist_downloader
 from ui import display, prompts, progress, help
 
@@ -273,8 +273,149 @@ def mode_create_new():
 def mode_update_existing():
     """Mode 2: Update existing multi-boot USB."""
     display.print_header("UPDATE EXISTING MULTI-BOOT USB")
-    display.print_warning("This feature is not yet implemented")
-    display.print_info("Coming in version 2.1.0")
+
+    # Step 1: Select USB drive
+    display.print_step(1, 5, "Select Target Drive")
+    usb_drives = disk_detector.get_external_usb_drives()
+
+    if not usb_drives:
+        display.print_error("No external USB drives detected!")
+        sys.exit(1)
+
+    disk_options = []
+    for disk in usb_drives:
+        option = f"{disk['name']} ({disk['id']}) - {disk['size_gb']:.1f} GB"
+        disk_options.append(option)
+
+    disk_choice = prompts.prompt_choice("\nSelect existing Multi-Tool USB:", disk_options)
+    if disk_choice is None: sys.exit(0)
+
+    selected_disk = usb_drives[disk_choice]
+
+    # Analyze drive structure
+    structure = updater.get_drive_structure(selected_disk['id'])
+    if not structure:
+        display.print_error("Failed to analyze drive structure.")
+        sys.exit(1)
+
+    if not structure['data_partition']:
+        display.print_warning("No DATA_STORE partition found. Is this a Multi-Tool drive?")
+        if not prompts.prompt_yes_no("Continue anyway?", 'n'):
+            sys.exit(0)
+
+    print(f"\nExisting Installers:")
+    for inst in structure['existing_installers']:
+        print(f"  • {inst}")
+
+    # Step 2: Select New Installers
+    display.print_step(2, 5, "Select New Installers")
+    installers = installer_scanner.scan_for_installers()
+
+    # Filter out likely duplicates? (Advanced, skip for now)
+
+    selected_indices = prompts.prompt_installer_selection(installers)
+    if not selected_indices:
+        display.print_warning("No new installers selected.")
+        sys.exit(0)
+
+    new_installers = [installers[i] for i in selected_indices]
+
+    # Step 3: Confirmation
+    display.print_step(3, 5, "Safety Confirmation")
+    display.print_warning(f"This will DELETE the '{structure['data_partition']['id']}' (DATA_STORE) partition!")
+    display.print_warning("Back up any files on the data partition before proceeding.")
+
+    if not prompts.confirm_destructive_action(
+        selected_disk['id'],
+        selected_disk['name'],
+        selected_disk['size_gb']
+    ):
+        sys.exit(0)
+
+    # Step 4: Execute Update
+    display.print_step(4, 5, "Updating Partitions")
+
+    # Delete Data Partition
+    if structure['data_partition']:
+        if not updater.delete_partition(structure['data_partition']['id']):
+            display.print_error("Failed to remove old partition.")
+            sys.exit(1)
+
+    # Add new partitions
+    new_parts = updater.add_partitions(selected_disk['id'], new_installers)
+    if not new_parts:
+        display.print_error("Failed to add new partitions.")
+        sys.exit(1)
+
+    # Restore Data Partition
+    updater.restore_data_partition(selected_disk['id'])
+
+    display.print_success("Partition map updated.")
+
+    # Step 5: Install
+    display.print_header("INSTALLING NEW VERSIONS")
+
+    # We need to find the mount points for the newly created partitions
+    # Assuming sequential order after the existing ones?
+    # Better: Scan the disk partitions again and match by name
+
+    import time
+    time.sleep(2) # Wait for kernel to update
+
+    current_partitions = partitioner.get_partition_list(selected_disk['id'])
+
+    successful = []
+    failed = []
+
+    for item in new_parts:
+        part_name = item['name']
+        inst = item['installer']
+
+        # Find the partition ID for this name
+        target_part = next((p for p in current_partitions if p['name'] == part_name), None)
+
+        if not target_part:
+            display.print_error(f"Could not find partition {part_name}")
+            failed.append(inst['name'])
+            continue
+
+        display.print_step(5, 5, f"Installing {inst['name']}")
+
+        volume_path = installer_runner.get_volume_mount_point(
+            selected_disk['id'],
+            target_part['id'].replace(selected_disk['id'], '').replace('s', '')
+            # This is hacky. target_part['id'] is full "disk2s5".
+            # installer_runner expects "disk2", 5.
+            # Let's fix installer_runner usage or just get path directly if mounted.
+        )
+
+        # Actually, get_volume_mount_point takes (disk_id, partition_num)
+        # partition_num can be extracted from disk2s5 -> 5
+        part_num = target_part['id'].split('s')[-1]
+
+        volume_path = installer_runner.get_volume_mount_point(selected_disk['id'], part_num)
+
+        start_time = time.time()
+        success = installer_runner.run_createinstallmedia(
+            inst['path'],
+            volume_path,
+            progress_callback=lambda p: progress.show_progress_bar(
+                f"Installing {inst['name']}", p, start_time
+            )
+        )
+
+        if success:
+            # Re-fetch volume path
+            new_volume_path = installer_runner.get_volume_mount_point(selected_disk['id'], part_num)
+            if new_volume_path:
+                os_name = constants.get_os_name(inst['version'])
+                branding.apply_full_branding(new_volume_path, inst['name'], os_name, inst['version'])
+            successful.append(inst['name'])
+        else:
+            failed.append(inst['name'])
+
+    display.print_header("UPDATE COMPLETE")
+    display.print_success(f"Added {len(successful)} installers.")
 
 def main():
     """Main entry point."""
