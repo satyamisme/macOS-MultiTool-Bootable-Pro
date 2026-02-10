@@ -49,20 +49,30 @@ This will check:
     cd macOS-MultiTool-Pro
     ```
 
-2.  **Make the script executable**:
+2.  **Run the automated setup script**:
     ```bash
-    chmod +x main.py
+    chmod +x run.sh
+    ./run.sh
     ```
+    This script will:
+    - Check Python version.
+    - Create a virtual environment to keep your system clean.
+    - Install optional dependencies like `mist-cli`.
+    - Launch the application with `sudo`.
 
 ## 🛠 Usage
 
-1.  **Run the application**:
+1.  **Run the application (Recommended)**:
     ```bash
-    ./main.py
+    ./run.sh
     ```
-    *Note: You will be prompted for your password to grant sudo privileges.*
 
-2.  **Follow the interactive prompts**:
+2.  **Run Manually (Advanced)**:
+    ```bash
+    sudo ./main.py
+    ```
+
+3.  **Follow the interactive prompts**:
     - **Step 1**: The tool scans for available installers. Select which ones you want to include.
     - **Step 2**: Select the target USB drive from the list of safe, external options.
     - **Step 3**: Confirm the destructive operation by typing `ERASE`.
