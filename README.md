@@ -51,9 +51,11 @@ This will check:
 
 2.  **Run the automated setup script**:
     ```bash
-    chmod +x run.sh
-    ./run.sh
+    chmod +x run.command
+    ./run.command
     ```
+    *Note: You can also double-click `run.command` in Finder to launch it.*
+
     This script will:
     - Check Python version.
     - Create a virtual environment to keep your system clean.
@@ -64,7 +66,7 @@ This will check:
 
 1.  **Run the application (Recommended)**:
     ```bash
-    ./run.sh
+    ./run.command
     ```
 
 2.  **Run Manually (Advanced)**:
