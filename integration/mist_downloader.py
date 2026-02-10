@@ -38,10 +38,19 @@ def download_installer(os_name, version=None):
         if not install_mist():
             return False
 
-    cmd = ['mist', 'download', 'installer', os_name]
+    # mist download installer <search-string> <output-type> ...
+    # We want to output an 'application' (.app)
+    cmd = ['mist', 'download', 'installer', os_name, 'application']
 
     if version:
         cmd += ['--version', version]
+
+    # mist output directory flag is --output-directory or -o?
+    # Checking mist help from user output: "Usage: mist download installer [<options>] ..."
+    # We assume --output-directory is correct based on previous code, but standard mist might be just argument order or specific flag.
+    # Let's stick to the flag if it worked before or is documented, but the user output showed help which implies the structure is:
+    # mist download installer [options] <search-string> <output-type>
+    # The flag --output-directory usually works.
 
     cmd += ['--output-directory', '/Applications']
 

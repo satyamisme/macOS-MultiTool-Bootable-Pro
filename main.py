@@ -88,7 +88,14 @@ def mode_create_new():
             print(f"    Reason: {reason}")
 
             if prompts.prompt_yes_no(f"    Download full installer for {inst['name']}?", 'n'):
-                os_name = constants.get_os_name(inst['version'])
+                # Try to guess OS name from the app name first (more reliable for weird versions)
+                # e.g., "Install macOS Catalina.app" -> "Catalina"
+                os_name = inst['name'].replace("Install macOS ", "").replace(".app", "")
+
+                # Fallback to version-based lookup if name parsing looks weird
+                if not os_name or len(os_name) > 20 or " " in os_name:
+                     os_name = constants.get_os_name(inst['version'])
+
                 if mist_downloader.download_installer(os_name):
                     display.print_success(f"Downloaded {os_name}")
                     # Re-scan to find the new installer
