@@ -47,6 +47,8 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
         partitions.extend(["ExFAT", "DATA_STORE", "R"])  # R = remaining
 
     # Build command
+    # Important: partitions list must be triplets (Filesystem, Name, Size)
+    # The list 'partitions' is already built as a flat list of triplets
     cmd = [
         "sudo", "diskutil", "partitionDisk",
         f"/dev/{disk_id}",

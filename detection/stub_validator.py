@@ -30,6 +30,7 @@ def is_stub_installer(app_path):
 
     size_mb = os.path.getsize(shared_support) / (1024 * 1024)
 
+    # 50MB is safe, but let's be more robust
     if size_mb < STUB_THRESHOLD_MB:
         return True
 

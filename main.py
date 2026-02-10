@@ -6,6 +6,7 @@ ZERO BUGS GUARANTEE: Orchestrates all modules with error handling
 
 import sys
 import os
+import time
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -15,7 +16,7 @@ from detection import installer_scanner, stub_validator, disk_detector
 from safety import boot_disk_guard, backup_manager
 from operations import partitioner, installer_runner, branding
 from integration import mist_downloader
-from ui import display, prompts, progress
+from ui import display, prompts, progress, help
 
 VERSION = "2.0.0"
 
@@ -186,7 +187,7 @@ def mode_create_new():
                 continue
 
             # Run createinstallmedia
-            start_time = __import__('time').time()
+            start_time = time.time()
 
             success = installer_runner.run_createinstallmedia(
                 inst['path'],
@@ -262,6 +263,11 @@ def mode_update_existing():
 
 def main():
     """Main entry point."""
+    # Simple argument parsing
+    if "-h" in sys.argv or "--help" in sys.argv:
+        help.print_usage(VERSION)
+        sys.exit(0)
+
     # Parse arguments
     dry_run = "--dry-run" in sys.argv
 

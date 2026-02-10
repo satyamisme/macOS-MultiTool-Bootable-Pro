@@ -66,7 +66,8 @@ def _get_boot_disk_id():
 def _is_unsafe_disk(disk_id, boot_disk_id):
     """Check if disk is unsafe to modify."""
     # Never touch disk0 or disk1
-    if disk_id in ['disk0', 'disk1']:
+    # Use exact string matching
+    if disk_id == 'disk0' or disk_id == 'disk1':
         return True
 
     # Never touch boot disk

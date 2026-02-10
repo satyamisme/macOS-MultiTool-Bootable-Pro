@@ -58,9 +58,11 @@ def get_os_name(version_string):
 def _extract_version_key(version_string):
     """
     Extract version key for database lookup.
-    Handles: "14.6.1", "15.2 Beta", "10.15.7-alpha"
+    Handles: "14.6.1", "15.2 Beta", "10.15.7-alpha", "15.0 Beta 3"
     """
-    # Clean version string
+    # Clean version string: remove "Beta", "RC", etc.
+    # Split by space first, take first part.
+    # Then split by hyphen, take first part.
     clean = version_string.split()[0].split('-')[0]
 
     try:
