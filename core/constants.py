@@ -6,6 +6,7 @@ ONE RESPONSIBILITY: Store OS metadata
 import math
 
 # macOS version database
+# buffer_gb: Extra space needed for installation process (temp files, expansion)
 OS_DATABASE = {
     "15": {"name": "Sequoia", "buffer_gb": 2.5, "min_year": 2024},
     "14": {"name": "Sonoma", "buffer_gb": 2.2, "min_year": 2023},

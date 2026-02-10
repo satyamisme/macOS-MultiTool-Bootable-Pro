@@ -1,0 +1,6 @@
+# No external dependencies required.
+# This project uses the Python 3.6+ standard library.
+# Optional tools:
+# - mist-cli (install via Homebrew: brew install mist)
+# - SetFile (part of Xcode Command Line Tools)
+# - bless (standard macOS command)
