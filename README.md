@@ -22,10 +22,24 @@ A modular, production-ready Python application for creating multi-boot macOS USB
 
 ## 📋 Requirements
 
-- **macOS**: 10.13 High Sierra or later.
-- **Python**: 3.6 or later (pre-installed on macOS).
+- **macOS**: 10.13 High Sierra or later (Recommended: macOS 12+).
+- **Python**: 3.8 or later (standard on macOS 12+).
+- **Architecture**: Intel and Apple Silicon (M1/M2/M3) supported.
 - **Privileges**: Root access (sudo) is required for disk operations.
 - **Installers**: Full macOS installer applications (e.g., "Install macOS Sonoma.app") located in `/Applications`.
+
+## 🧪 Testing
+
+The repository includes a comprehensive verification suite to ensure your environment is ready.
+
+To run the tests:
+```bash
+python3 tests/test_full_verification.py
+```
+This will check:
+- Python version compatibility
+- Required system commands (diskutil, sudo, du)
+- Module imports and syntax
 
 ## 📦 Installation
 
@@ -62,6 +76,15 @@ A modular, production-ready Python application for creating multi-boot macOS USB
     - Restart your Mac.
     - Hold the **Option (⌥)** key during startup.
     - Select the desired macOS installer from the boot menu.
+
+## ❓ Troubleshooting
+
+Common issues and solutions:
+
+- **"Root privileges required"**: Always run the script with `sudo`.
+- **"No macOS installers found"**: Ensure you have downloaded the full installer (12GB+), not just an update stub. Use `mist-cli` to download full installers if needed.
+- **"Partitioning failed"**: Unmount the USB drive first or format it as "Mac OS Extended (Journaled)" in Disk Utility to clear any corrupted partition tables.
+- **"Installation failed"**: Check the logs at `/tmp/multiboot_logs/` for detailed error messages.
 
 ## 📂 Project Structure
 

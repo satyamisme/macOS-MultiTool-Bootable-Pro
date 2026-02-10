@@ -1,0 +1,31 @@
+name: Verify Codebase
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  verify:
+    runs-on: macos-latest
+
+    steps:
+    - uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+
+    - name: Verify Environment
+      run: |
+        python3 --version
+        which diskutil
+        which sudo
+
+    - name: Run Verification Suite
+      run: python3 tests/test_full_verification.py
+
+    - name: Run Logic Tests
+      run: python3 tests/test_basic.py
