@@ -9,14 +9,21 @@ on:
 jobs:
   verify:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
 
     steps:
     - uses: actions/checkout@v3
 
-    - name: Set up Python
+    - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
-        python-version: '3.11'
+        python-version: ${{ matrix.python-version }}
+
+    - name: Install Dependencies
+      run: |
+        pip install -r requirements.txt
 
     - name: Verify Environment
       run: |
@@ -24,8 +31,14 @@ jobs:
         which diskutil
         which sudo
 
-    - name: Run Verification Suite
+    - name: Run Syntax Checks
+      run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+
+    - name: Run Full Verification Suite
       run: python3 tests/test_full_verification.py
 
     - name: Run Logic Tests
       run: python3 tests/test_basic.py
+
+    - name: Run Integration Tests
+      run: pytest tests/test_integration.py
