@@ -15,7 +15,7 @@ from detection import installer_scanner, stub_validator, disk_detector
 from safety import boot_disk_guard, backup_manager
 from operations import partitioner, installer_runner, branding
 from integration import mist_downloader
-from ui import display, prompts, progress
+from ui import display, prompts, progress, help
 
 VERSION = "2.0.0"
 
@@ -262,6 +262,11 @@ def mode_update_existing():
 
 def main():
     """Main entry point."""
+    # Simple argument parsing
+    if "-h" in sys.argv or "--help" in sys.argv:
+        help.print_usage(VERSION)
+        sys.exit(0)
+
     # Parse arguments
     dry_run = "--dry-run" in sys.argv
 
