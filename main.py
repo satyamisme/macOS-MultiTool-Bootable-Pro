@@ -199,14 +199,23 @@ def mode_create_new():
             )
 
             if success:
-                # Apply branding
-                os_name = constants.get_os_name(inst['version'])
-                branding.apply_full_branding(
-                    volume_path,
-                    inst['name'],
-                    os_name,
-                    inst['version']
+                # Re-fetch volume path as it may have changed after createinstallmedia
+                new_volume_path = installer_runner.get_volume_mount_point(
+                    selected_disk['id'],
+                    partition_num
                 )
+
+                if new_volume_path:
+                    # Apply branding
+                    os_name = constants.get_os_name(inst['version'])
+                    branding.apply_full_branding(
+                        new_volume_path,
+                        inst['name'],
+                        os_name,
+                        inst['version']
+                    )
+                else:
+                    display.print_warning(f"Could not remount volume for branding: {inst['name']}")
 
                 display.print_success(f"{inst['name']} installed successfully!")
                 successful.append(inst['name'])
