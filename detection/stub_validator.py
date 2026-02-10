@@ -4,6 +4,7 @@ ONE RESPONSIBILITY: Check installer completeness
 """
 
 import os
+import subprocess
 
 # Thresholds in MB
 STUB_THRESHOLD_MB = 50
@@ -42,6 +43,18 @@ def is_stub_installer(app_path):
 
     # If neither exists, it's a stub
     if not os.path.exists(base_system) and size_mb < MINIMUM_SHARED_SUPPORT_MB:
+        # Final fallback: Check total app size. If > 4GB, it's likely a full installer
+        # even if internal structure is non-standard.
+        try:
+            total_size_mb = int(subprocess.check_output(
+                ['du', '-sk', app_path], stderr=subprocess.DEVNULL
+            ).split()[0]) / 1024
+
+            if total_size_mb > 4000:  # 4GB
+                return False
+        except:
+            pass
+
         return True
 
     return False

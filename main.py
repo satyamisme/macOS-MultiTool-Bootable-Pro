@@ -88,8 +88,16 @@ def mode_create_new():
             print(f"    Reason: {reason}")
 
             if prompts.prompt_yes_no(f"    Download full installer for {inst['name']}?", 'n'):
-                # This would integrate with mist_downloader
-                display.print_warning("Mist integration not yet implemented")
+                os_name = constants.get_os_name(inst['version'])
+                if mist_downloader.download_installer(os_name):
+                    display.print_success(f"Downloaded {os_name}")
+                    # Re-scan to find the new installer
+                    # Note: We restart the loop logic conceptually, but for simplicity
+                    # we'll ask the user to restart the tool to pick up the new file
+                    display.print_info("Please restart the tool to use the downloaded installer.")
+                    sys.exit(0)
+                else:
+                    display.print_error("Download failed")
 
     if not valid_installers:
         display.print_error("No valid full installers available")
