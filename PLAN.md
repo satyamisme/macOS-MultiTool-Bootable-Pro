@@ -41,7 +41,7 @@ This document outlines the finished and unfinished tasks for the **macOS Multi-T
 ### 🔮 Planned Features (v2.1.0+)
 - [ ] **GUI Interface**: Build a native macOS UI (using `tkinter` or `pyobjc`).
 - [ ] **Apple Silicon Optimization**: Specific tweaks for M1/M2/M3 chips (though currently compatible via Rosetta/Universal binaries).
-- [ ] **Mist Integration**: Fully automate the *downloading* of installers inside the app (currently suggests `mist-cli`).
+- [x] **Mist Integration**: Fully automate the *downloading* of installers inside the app using `mist-cli` integration.
 - [ ] **Update Existing USB**: Allow adding new installers to an existing multi-boot drive without reformatting.
 - [ ] **Windows/Linux Support**: Create bootable Windows/Linux USBs (out of scope for current macOS-focused tool).
 
@@ -56,4 +56,4 @@ This document outlines the finished and unfinished tasks for the **macOS Multi-T
 
 - **macOS Only**: This tool strictly requires macOS to run (due to `createinstallmedia` and `diskutil` dependencies).
 - **Root Required**: Must be run with `sudo` (handled by `run.command`).
-- **Full Installers**: Cannot use "stub" installers (20MB wrappers); requires full 12GB+ apps.
+- **Full Installers**: Cannot use "stub" installers (20MB wrappers); requires full 12GB+ apps. Note: The tool now smartly detects full installers even with non-standard structures if size > 4GB.

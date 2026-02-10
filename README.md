@@ -94,7 +94,7 @@ This will check:
 Common issues and solutions:
 
 - **"Root privileges required"**: Always run the script with `sudo`.
-- **"No macOS installers found"**: Ensure you have downloaded the full installer (12GB+), not just an update stub. Use `mist-cli` to download full installers if needed.
+- **"No macOS installers found"**: Ensure you have downloaded the full installer (12GB+), not just an update stub. The tool can now attempt to download full installers for you using `mist-cli`.
 - **"Partitioning failed"**: Unmount the USB drive first or format it as "Mac OS Extended (Journaled)" in Disk Utility to clear any corrupted partition tables.
 - **"Installation failed"**: Check the logs at `/tmp/multiboot_logs/` for detailed error messages.
 
