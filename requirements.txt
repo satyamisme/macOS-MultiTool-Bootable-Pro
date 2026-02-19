@@ -1,6 +1,6 @@
 pytest==8.0.0
 pytest-mock==3.12.0
-pre-commit==3.6.0
+pre-commit==3.5.0
 flake8==7.0.0
 # The core application uses only standard library.
 # These dependencies are for development and testing only.
