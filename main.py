@@ -381,17 +381,17 @@ def mode_update_existing():
 
         display.print_step(5, 5, f"Installing {inst['name']}")
 
-        volume_path = installer_runner.get_volume_mount_point(
-            selected_disk['id'],
-            target_part['id'].replace(selected_disk['id'], '').replace('s', '')
-            # This is hacky. target_part['id'] is full "disk2s5".
-            # installer_runner expects "disk2", 5.
-            # Let's fix installer_runner usage or just get path directly if mounted.
-        )
-
-        # Actually, get_volume_mount_point takes (disk_id, partition_num)
-        # partition_num can be extracted from disk2s5 -> 5
-        part_num = target_part['id'].split('s')[-1]
+        # Extract partition number (e.g. disk2s5 -> 5) using regex for robustness
+        # or simple split if we trust the format "diskXsY"
+        try:
+            part_suffix = target_part['id'].replace(selected_disk['id'], '')
+            part_num = part_suffix.replace('s', '')
+            if not part_num.isdigit():
+                 raise ValueError(f"Could not parse partition number from {target_part['id']}")
+        except Exception as e:
+            display.print_error(f"Error parsing partition ID: {e}")
+            failed.append(inst['name'])
+            continue
 
         volume_path = installer_runner.get_volume_mount_point(selected_disk['id'], part_num)
 
