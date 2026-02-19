@@ -45,12 +45,9 @@ def download_installer(os_name, version=None):
     if version:
         cmd += ['--version', version]
 
-    # mist output directory flag is --output-directory or -o?
-    # Checking mist help from user output: "Usage: mist download installer [<options>] ..."
-    # We assume --output-directory is correct based on previous code, but standard mist might be just argument order or specific flag.
-    # Let's stick to the flag if it worked before or is documented, but the user output showed help which implies the structure is:
-    # mist download installer [options] <search-string> <output-type>
-    # The flag --output-directory usually works.
+    # Force overwrite if needed, as per user request to handle "Existing file" errors
+    # Mist documentation/help typically supports --force to overwrite
+    cmd += ['--force']
 
     cmd += ['--output-directory', '/Applications']
 
