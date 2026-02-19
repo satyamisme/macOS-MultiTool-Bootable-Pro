@@ -63,7 +63,59 @@ def scan_for_installers(search_paths: Optional[List[str]] = None) -> List[Dict[s
             if metadata:
                 found_installers.append(metadata)
 
+    # Also scan for partials
+    partials = scan_for_partial_downloads(search_paths)
+    found_installers.extend(partials)
+
     return found_installers
+
+def scan_for_partial_downloads(search_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
+    """
+    Scan for partial/failed downloads (e.g., .download bundles or mist temp folders).
+    """
+    # Clone list to avoid modifying input
+    paths = list(search_paths) if search_paths else list(DEFAULT_SEARCH_PATHS)
+
+    # Add mist temp path if likely
+    mist_temp = "/private/tmp/com.ninxsoft.mist"
+    if os.path.exists(mist_temp) and mist_temp not in paths:
+        paths.append(mist_temp)
+
+    partial_installers = []
+
+    for search_dir in paths:
+        if not os.path.exists(search_dir): continue
+
+        try:
+            items = os.listdir(search_dir)
+        except PermissionError: continue
+
+        for item in items:
+            full_path = os.path.join(search_dir, item)
+
+            # Check for .download (App Store / Software Update partials)
+            if item.endswith(".app.download"):
+                partial_installers.append({
+                    'name': item.replace(".download", ""),
+                    'path': full_path,
+                    'version': "Partial",
+                    'size_kb': 0,
+                    'bundle_id': 'partial.download',
+                    'status': 'PARTIAL'
+                })
+
+            # Check for Mist temp directories (simple heuristic)
+            if "com.ninxsoft.mist" in search_dir and os.path.isdir(full_path):
+                 partial_installers.append({
+                    'name': f"Mist Download: {item}",
+                    'path': full_path,
+                    'version': "In Progress",
+                    'size_kb': 0,
+                    'bundle_id': 'mist.download',
+                    'status': 'DOWNLOADING'
+                })
+
+    return partial_installers
 
 def _extract_installer_metadata(app_path):
     """Extract version and size from installer .app"""
@@ -89,12 +141,21 @@ def _extract_installer_metadata(app_path):
         except:
             size_kb = 0
 
+        # Determine status
+        # We need to import stub_validator here or pass logic.
+        # Ideally scan just returns metadata, caller determines status.
+        # But we want to flag "Partial".
+
+        status = "UNKNOWN"
+        # Check for .download extension? No, this scans .app.
+
         return {
             'name': os.path.basename(app_path),
             'path': app_path,
             'version': version,
             'size_kb': size_kb,
-            'bundle_id': bundle_id
+            'bundle_id': bundle_id,
+            # Status will be populated by caller using stub_validator
         }
 
     except Exception as e:

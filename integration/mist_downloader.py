@@ -42,41 +42,52 @@ def install_mist():
     result = subprocess.run(['brew', 'install', 'mist'])
     return result.returncode == 0
 
-def download_installer(os_name, version=None):
+def download_installer(os_names, version=None):
     """
-    Download full installer using mist-cli.
+    Download full installer(s) using mist-cli.
 
     Args:
-        os_name: macOS name (e.g., "Sonoma")
-        version: Specific version (optional)
+        os_names: macOS name (e.g., "Sonoma") or list of names ["Sonoma", "Ventura"]
+        version: Specific version (optional, only applies if single os_name)
 
     Returns:
-        bool: True if successful
+        bool: True if ALL successful
     """
     if not check_mist_available():
         print("mist-cli not found")
         if not install_mist():
             return False
 
-    # mist download installer [options] <search-string> <output-type> ...
-    # Options must come BEFORE the search string and output type.
-    cmd = ['mist', 'download', 'installer']
+    if isinstance(os_names, str):
+        os_names = [os_names]
 
-    # Options
-    cmd += ['--force']
-    cmd += ['--output-directory', '/Applications']
+    success_count = 0
 
-    if version:
-        cmd += ['--version', version]
+    for name in os_names:
+        # mist download installer [options] <search-string> <output-type> ...
+        cmd = ['mist', 'download', 'installer']
 
-    # Positional arguments
-    cmd += [os_name, 'application']
+        # Options
+        cmd += ['--force']
+        cmd += ['--output-directory', '/Applications']
 
-    print(f"\nDownloading {os_name}...")
-    print("This may take 20-40 minutes depending on connection speed.")
+        # Version only applies if single installer requested or we assume same version logic?
+        # Typically version arg is specific to one OS. We ignore it for multi-batch unless
+        # the list is size 1.
+        if version and len(os_names) == 1:
+            cmd += ['--version', version]
 
-    result = subprocess.run(cmd)
-    return result.returncode == 0
+        # Positional arguments
+        cmd += [name, 'application']
+
+        print(f"\nDownloading {name}...")
+        print("This may take 20-40 minutes depending on connection speed.")
+
+        result = subprocess.run(cmd)
+        if result.returncode == 0:
+            success_count += 1
+
+    return success_count == len(os_names)
 
 def get_installer_size(search_term):
     """
