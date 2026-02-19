@@ -19,6 +19,26 @@ def install_mist():
         return False
 
     print("Installing mist-cli via Homebrew...")
+
+    # Check if running as root
+    import os
+    if os.geteuid() == 0:
+        # Homebrew cannot run as root.
+        # We need to drop privileges or ask user to run manually.
+        # Attempt to run as the original user (SUDO_USER)
+        sudo_user = os.environ.get('SUDO_USER')
+        if sudo_user:
+            print(f"  Switching to user '{sudo_user}' for Homebrew installation...")
+            result = subprocess.run(
+                ['sudo', '-u', sudo_user, 'brew', 'install', 'mist'],
+                capture_output=False
+            )
+            return result.returncode == 0
+        else:
+            print("❌ Cannot install Homebrew as root without SUDO_USER environment variable.")
+            print("Please install mist-cli manually: brew install mist")
+            return False
+
     result = subprocess.run(['brew', 'install', 'mist'])
     return result.returncode == 0
 
@@ -38,18 +58,19 @@ def download_installer(os_name, version=None):
         if not install_mist():
             return False
 
-    # mist download installer <search-string> <output-type> ...
-    # We want to output an 'application' (.app)
-    cmd = ['mist', 'download', 'installer', os_name, 'application']
+    # mist download installer [options] <search-string> <output-type> ...
+    # Options must come BEFORE the search string and output type.
+    cmd = ['mist', 'download', 'installer']
+
+    # Options
+    cmd += ['--force']
+    cmd += ['--output-directory', '/Applications']
 
     if version:
         cmd += ['--version', version]
 
-    # Force overwrite if needed, as per user request to handle "Existing file" errors
-    # Mist documentation/help typically supports --force to overwrite
-    cmd += ['--force']
-
-    cmd += ['--output-directory', '/Applications']
+    # Positional arguments
+    cmd += [os_name, 'application']
 
     print(f"\nDownloading {os_name}...")
     print("This may take 20-40 minutes depending on connection speed.")

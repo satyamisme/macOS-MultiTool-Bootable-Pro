@@ -8,6 +8,7 @@ import math
 # macOS version database
 # buffer_gb: Extra space needed for installation process (temp files, expansion)
 OS_DATABASE = {
+    "26": {"name": "Tahoe", "buffer_gb": 3.0, "min_year": 2025},
     "15": {"name": "Sequoia", "buffer_gb": 2.5, "min_year": 2024},
     "14": {"name": "Sonoma", "buffer_gb": 2.2, "min_year": 2023},
     "13": {"name": "Ventura", "buffer_gb": 2.0, "min_year": 2022},
@@ -72,6 +73,7 @@ def _extract_version_key(version_string):
         if parts[0] == "10" and len(parts) >= 2:
             return f"{parts[0]}.{parts[1]}"  # "10.15"
         else:
-            return parts[0]  # "15"
+            # Handle standard major versions (11, 12, 13, 14, 15, 26, etc)
+            return parts[0]
     except (IndexError, ValueError):
         return "11"  # Default fallback

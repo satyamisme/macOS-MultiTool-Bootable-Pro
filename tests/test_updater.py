@@ -70,19 +70,38 @@ class TestUpdater(unittest.TestCase):
         self.assertEqual(structure['data_partition']['id'], 'disk2s3')
         self.assertEqual(structure['existing_installers'], ['Install macOS Sonoma'])
 
-    @patch('subprocess.run')
-    def test_delete_partition(self, mock_run):
-        """Test partition deletion logic."""
-        mock_run.return_value = MagicMock(returncode=0)
+    @patch('subprocess.check_output')
+    @patch('operations.updater.get_drive_structure')
+    def test_split_partition(self, mock_get_struct, mock_output):
+        """Test partition splitting logic."""
 
-        result = updater.delete_partition("disk2s3")
+        # Mock successful split output
+        mock_output.return_value = "Finished partition on disk2s5"
 
-        self.assertTrue(result)
-        mock_run.assert_called_with(
-            ['sudo', 'diskutil', 'eraseVolume', 'FREE', '%noformat%', 'disk2s3'],
-            check=True,
-            capture_output=True
-        )
+        # Mock drive structure for subsequent splits (recursion case)
+        mock_get_struct.return_value = {
+            'data_partition': {'id': 'disk2s6'},
+            'disk_size': 64000000000,
+            'existing_installers': []
+        }
+
+        installers = [{
+            'name': 'Install macOS Sonoma.app',
+            'version': '14.6.1',
+            'size_kb': 14000000
+        }]
+
+        new_parts = updater.split_partition("disk2s5", installers)
+
+        self.assertEqual(len(new_parts), 1)
+        self.assertEqual(new_parts[0]['name'].startswith("INSTALL_Sonoma"), True)
+
+        # Verify call args
+        args = mock_output.call_args[0][0]
+        self.assertEqual(args[0], 'sudo')
+        self.assertEqual(args[1], 'diskutil')
+        self.assertEqual(args[2], 'splitPartition')
+        self.assertEqual(args[3], 'disk2s5')
 
 if __name__ == '__main__':
     unittest.main()
