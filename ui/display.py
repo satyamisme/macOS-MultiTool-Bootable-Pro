@@ -5,6 +5,7 @@ ZERO BUGS: Safe color codes with fallback
 """
 
 import sys
+from ui import i18n
 
 # ANSI color codes
 class Colors:

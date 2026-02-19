@@ -13,6 +13,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import constants
 from detection import installer_scanner, disk_detector
 from operations import partitioner
+import subprocess
 
 class TestIntegration(unittest.TestCase):
 
@@ -82,9 +83,22 @@ class TestIntegration(unittest.TestCase):
         self.assertIn("GPT", args)
         # Check for partition triplet
         self.assertIn("JHFS+", args)
-        # Check for correct sizing logic (should be > 14GB)
-        # We can't easily check the exact index without complex logic,
-        # but we can ensure the structure exists.
+
+    @patch('subprocess.run')
+    def test_partitioner_failure(self, mock_run):
+        """Test partitioner handles failure gracefully"""
+        disk_id = "disk9"
+        installers = [{
+            'name': 'Install macOS Sonoma.app',
+            'version': '14.6.1',
+            'size_kb': 14000000
+        }]
+
+        # Mock failure
+        mock_run.side_effect = subprocess.CalledProcessError(1, ['cmd'])
+
+        success = partitioner.create_multiboot_layout(disk_id, installers, 64.0)
+        self.assertFalse(success)
 
 if __name__ == '__main__':
     unittest.main()
