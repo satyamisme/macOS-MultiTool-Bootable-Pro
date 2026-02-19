@@ -27,12 +27,15 @@ def mode_download_installer():
         return
 
     print("\n")
-    search_term = prompts.prompt_text("Enter macOS name or version to download (e.g., 'Sonoma', '14.6'):")
+    search_term = prompts.prompt_text("Enter macOS names/versions (comma-separated, e.g. 'Sonoma, Ventura'):")
     if not search_term:
         return
 
-    if mist_downloader.download_installer(search_term):
-        display.print_success(f"Successfully downloaded installer matching '{search_term}'")
-        display.print_info("You can now use 'Create New Multi-Boot USB' to install it.")
+    # Split by comma and strip
+    targets = [t.strip() for t in search_term.split(',') if t.strip()]
+
+    if mist_downloader.download_installer(targets):
+        display.print_success(f"Successfully downloaded: {', '.join(targets)}")
+        display.print_info("You can now use 'Create New Multi-Boot USB' to install them.")
     else:
-        display.print_error("Download failed.")
+        display.print_error("One or more downloads failed.")

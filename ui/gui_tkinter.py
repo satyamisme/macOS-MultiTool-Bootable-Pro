@@ -67,7 +67,7 @@ class MultiBootGUI:
         inst_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         # Treeview for installers
-        cols = ("Name", "Version", "Size", "Source")
+        cols = ("Name", "Version", "Size", "Status")
         self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=8)
         for col in cols:
             self.inst_tree.heading(col, text=col)
@@ -146,11 +146,14 @@ class MultiBootGUI:
         if self.installers_list:
             for inst in self.installers_list:
                 size_gb = inst['size_kb'] / (1024 * 1024)
+                status = inst.get('status', 'FULL')
+
+                # Highlight partials? We can use tags but for now just text
                 self.inst_tree.insert("", "end", values=(
                     inst['name'],
                     inst['version'],
                     f"{size_gb:.2f} GB",
-                    "Local"
+                    status
                 ))
             self.log(f"Found {len(self.installers_list)} local installer(s).")
         else:
@@ -165,15 +168,15 @@ class MultiBootGUI:
             self.inst_tree.selection_remove(item)
 
     def open_download_dialog(self):
-        # Simple input dialog for now
-        # In future, could be a list of available downloads via 'mist list'
+        # Allow multi-download via comma separation
         import tkinter.simpledialog
-        search = tkinter.simpledialog.askstring("Download Installer", "Enter macOS Name or Version (e.g. Sonoma):")
+        search = tkinter.simpledialog.askstring("Download Installer", "Enter macOS Names/Versions (comma-separated):")
         if search:
-            self.log(f"Queuing download for '{search}'...")
-            threading.Thread(target=self.run_download_thread, args=(search,)).start()
+            targets = [t.strip() for t in search.split(',') if t.strip()]
+            self.log(f"Queuing download for: {', '.join(targets)}")
+            threading.Thread(target=self.run_download_thread, args=(targets,)).start()
 
-    def run_download_thread(self, search_term):
+    def run_download_thread(self, targets):
         self.create_btn.config(state="disabled")
         try:
             # Check mist
@@ -182,10 +185,9 @@ class MultiBootGUI:
                 mist_downloader.install_mist()
 
             # Download
-            self.log(f"Running mist download for '{search_term}'...")
-            # We use the existing module but need to capture output ideally.
-            # For now, standard download logic.
-            if mist_downloader.download_installer(search_term):
+            self.log(f"Running mist download for: {targets}...")
+
+            if mist_downloader.download_installer(targets):
                 self.log("Download complete!")
                 self.root.after(0, self.scan_installers)
             else:
