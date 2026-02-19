@@ -10,6 +10,7 @@ def print_usage(version):
     print("  --dry-run        Simulate operations without making changes")
     print("  --debug          Enable verbose logging")
     print("  --app-dir PATH   Custom path to search for installers")
+    print("  --gui            Launch Graphical User Interface")
     print("\nDESCRIPTION:")
     print("  macOS Multi-Tool Pro creates multi-boot USB installers for macOS.")
     print("  It scans for installers, partitions the drive, and installs multiple versions.")

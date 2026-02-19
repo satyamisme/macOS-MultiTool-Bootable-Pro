@@ -446,8 +446,14 @@ def main():
     parser.add_argument("--dry-run", action="store_true", help="Simulate operations without making changes")
     parser.add_argument("--debug", action="store_true", help="Enable verbose logging")
     parser.add_argument("--app-dir", type=str, help="Custom path to search for installers")
+    parser.add_argument("--gui", action="store_true", help="Launch Graphical User Interface")
 
     args = parser.parse_args()
+
+    if args.gui:
+        from ui import gui_tkinter
+        gui_tkinter.launch()
+        sys.exit(0)
 
     dry_run = args.dry_run
 
