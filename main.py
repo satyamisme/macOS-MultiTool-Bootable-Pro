@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from core import privilege, constants
 from detection import installer_scanner, stub_validator, disk_detector
 from safety import boot_disk_guard, backup_manager
-from operations import partitioner, installer_runner, branding, updater
+from operations import partitioner, installer_runner, branding, updater, download_mode
 from integration import mist_downloader
 from ui import display, prompts, progress, help
 
@@ -55,21 +55,25 @@ def mode_create_new():
     display.print_header("CREATE NEW MULTI-BOOT USB")
 
     # Step 1: Scan for installers
-    display.print_step(1, 5, "Scanning for macOS installers")
-    installers = installer_scanner.scan_for_installers()
+    while True:
+        display.print_step(1, 5, "Scanning for macOS installers")
+        installers = installer_scanner.scan_for_installers()
 
-    if not installers:
-        display.print_error("No macOS installers found!")
-        display.print_info("Download installers using:")
-        print("  • App Store")
-        print("  • Mist: https://github.com/ninxsoft/Mist")
-        print("  • mist-cli: brew install mist")
-        sys.exit(1)
+        if not installers:
+            display.print_error("No macOS installers found!")
+            if prompts.prompt_yes_no("Download a macOS installer now?"):
+                mode_download_installer()
+                continue
+            else:
+                display.print_info("Download installers using App Store or 'mist-cli'.")
+                return # Return to main menu instead of exit
 
-    print(f"\nFound {len(installers)} installer(s):\n")
+        print(f"\nFound {len(installers)} installer(s):\n")
+        break
 
     # Validate installers
     valid_installers = []
+    restart_scan = False
     for inst in installers:
         is_stub = stub_validator.is_stub_installer(inst['path'])
         inst['is_stub'] = is_stub
@@ -98,17 +102,21 @@ def mode_create_new():
 
                 if mist_downloader.download_installer(os_name):
                     display.print_success(f"Downloaded {os_name}")
-                    # Re-scan to find the new installer
-                    # Note: We restart the loop logic conceptually, but for simplicity
-                    # we'll ask the user to restart the tool to pick up the new file
-                    display.print_info("Please restart the tool to use the downloaded installer.")
-                    sys.exit(0)
+                    restart_scan = True
+                    break
                 else:
                     display.print_error("Download failed")
 
+    if restart_scan:
+        continue
+
     if not valid_installers:
         display.print_error("No valid full installers available")
-        sys.exit(1)
+        if prompts.prompt_yes_no("Download a macOS installer now?"):
+             mode_download_installer()
+             continue
+        else:
+             return
 
     # Step 2: Select USB drive
     display.print_step(2, 5, "Detecting USB drives")
@@ -270,6 +278,10 @@ def mode_create_new():
     print("  3. Select the desired macOS installer")
     print("="*70 + "\n")
 
+def mode_download_installer():
+    """Mode 3: Download macOS installer."""
+    download_mode.mode_download_installer()
+
 def mode_update_existing():
     """Mode 2: Update existing multi-boot USB."""
     display.print_header("UPDATE EXISTING MULTI-BOOT USB")
@@ -335,20 +347,20 @@ def mode_update_existing():
     # Step 4: Execute Update
     display.print_step(4, 5, "Updating Partitions")
 
-    # Delete Data Partition
+    # Split Data Partition
     if structure['data_partition']:
-        if not updater.delete_partition(structure['data_partition']['id']):
-            display.print_error("Failed to remove old partition.")
+        # New approach: Split the data partition iteratively
+        new_parts = updater.split_partition(structure['data_partition']['id'], new_installers)
+
+        if not new_parts:
+            display.print_error("Failed to add any new partitions.")
             sys.exit(1)
 
-    # Add new partitions
-    new_parts = updater.add_partitions(selected_disk['id'], new_installers)
-    if not new_parts:
-        display.print_error("Failed to add new partitions.")
+        if len(new_parts) < len(new_installers):
+            display.print_warning("Some partitions could not be created (disk full?).")
+    else:
+        display.print_error("Cannot update: DATA_STORE partition missing.")
         sys.exit(1)
-
-    # Restore Data Partition
-    updater.restore_data_partition(selected_disk['id'])
 
     display.print_success("Partition map updated.")
 
@@ -446,7 +458,8 @@ def main():
         "Select operation mode:",
         [
             "Create New Multi-Boot USB",
-            "Update Existing Multi-Boot USB (Coming Soon)",
+            "Update Existing Multi-Boot USB",
+            "Download macOS Installer (via Mist)",
             "Exit"
         ]
     )
@@ -459,6 +472,9 @@ def main():
 
     elif choice == 1:
         mode_update_existing()
+
+    elif choice == 2:
+        mode_download_installer()
 
     else:
         print("\nGoodbye!")

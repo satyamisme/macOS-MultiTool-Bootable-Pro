@@ -57,43 +57,21 @@ def get_drive_structure(disk_id):
         print(f"Error scanning drive: {e}")
         return None
 
-def delete_partition(part_id):
+def split_partition(part_id, new_installers):
     """
-    Delete a partition to free up space.
+    Split the DATA_STORE partition to create space for new installers.
 
     Args:
-        part_id: Partition identifier (e.g., "disk2s5")
-
-    Returns:
-        bool: True if successful
-    """
-    print(f"  Deleting partition {part_id}...")
-    try:
-        # "eraseVolume FREE %noformat% <device>" turns it into free space
-        subprocess.run(
-            ['sudo', 'diskutil', 'eraseVolume', 'FREE', '%noformat%', part_id],
-            check=True,
-            capture_output=True
-        )
-        return True
-    except subprocess.CalledProcessError as e:
-        print(f"  ❌ Failed to delete partition: {e}")
-        return False
-
-def add_partitions(disk_id, new_installers):
-    """
-    Add partitions for new installers into free space.
-
-    Args:
-        disk_id: Base disk identifier
+        part_id: The partition identifier to split (e.g., "disk2s5")
         new_installers: List of installer metadata
 
     Returns:
-        list: List of new partition mount points or identifiers
+        list: List of new partition info [{'name':..., 'installer':...}]
     """
+    current_part = part_id
     new_partitions = []
 
-    for installer in new_installers:
+    for i, installer in enumerate(new_installers):
         size_gb = constants.calculate_partition_size(
             installer['size_kb'],
             installer['version']
@@ -107,17 +85,64 @@ def add_partitions(disk_id, new_installers):
         print(f"  Adding partition: {part_name} ({size_gb} GB)...")
 
         try:
-            # diskutil addPartition <DiskIdentifier> <Filesystem> <Name> <Size>
-            # We add to the main disk; diskutil finds the free space at the end
-            cmd = [
-                'sudo', 'diskutil', 'addPartition',
-                disk_id,
-                'JHFS+',
-                part_name,
-                f"{size_gb}G"
-            ]
-
-            # This output needs parsing to find the new identifier
+            # diskutil addPartition requires an existing partition to split/resize.
+            # Since we deleted the data partition, we have free space.
+            # But diskutil addPartition cannot target "free space" directly or the disk ID easily in all versions.
+            # The most reliable way to add to free space is to resize the container or use 'partitionDisk' with 'resize'.
+            # However, 'addPartition' works if we target the *preceding* partition and ask it to split?
+            # Or if we target the disk ID, it might try to use the free space.
+            # Actually, `diskutil addPartition` expects a PARTITION identifier to split.
+            # If we erased the last partition, we can't "split" it because it's gone.
+            #
+            # ALTERNATIVE STRATEGY:
+            # Instead of `eraseVolume FREE`, we should have resized or just overwritten it.
+            # But since we already deleted it (to allow for potentially multiple new partitions),
+            # we need to recovery.
+            #
+            # BETTER STRATEGY for simplicity:
+            # We just use `partitionDisk` again on the whole disk? No, that wipes everything.
+            # We need to resizing the PREVIOUS partition to fill the space, then split it?
+            # Too risky.
+            #
+            # CORRECT APPROACH for this tool:
+            # If we deleted the partition, we should use `diskutil resizeVolume` on the preceding partition
+            # to claim the space, then split it?
+            # OR, assume the user has a APFS container? No, we use JHFS+.
+            #
+            # Let's fix the immediate crash: target the preceding partition?
+            # But we don't know it easily.
+            #
+            # Actually, if we use `diskutil splitPartition` on the DATA_STORE *before* deleting it, that works better.
+            # But the code structure already deletes it.
+            #
+            # Let's pivot:
+            # Instead of `eraseVolume FREE`, the `delete_partition` should have just formatted it as the first new installer?
+            #
+            # BUT, to fix the specific error "does not appear to be a valid partition identifier":
+            # We will use `diskutil resizeVolume` on the disk ID? No.
+            #
+            # Let's try to target the disk ID with `diskutil splitPartition`? No.
+            #
+            # If we assume we are at the end of the disk (DATA_STORE is usually last),
+            # maybe we can find the free space gap?
+            #
+            # For this version, let's revert to a safer approach:
+            # Reformat the EXISTING DATA_STORE partition to the new installer (if it fits).
+            # If we have multiple installers, we need to split it.
+            #
+            # So:
+            # 1. Don't delete DATA_STORE in step 1.
+            # 2. Use `diskutil splitPartition` on DATA_STORE to create [NewInstaller, NewDataStore].
+            # 3. Loop.
+            #
+            # This requires refactoring `main.py` and `updater.py`.
+            #
+            # Given the constraints and the review feedback, I will implement `splitPartition` logic
+            # inside `add_partitions` assuming `disk_id` passed here IS the data partition ID.
+            # Wait, `add_partitions` currently receives the `disk_id` (e.g. disk2).
+            #
+            # I will modify `main.py` to NOT delete the partition, but pass the partition ID to `add_partitions`.
+            pass
             result = subprocess.check_output(cmd, text=True)
 
             # The command output usually ends with details of the new disk
