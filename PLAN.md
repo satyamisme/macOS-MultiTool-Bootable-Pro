@@ -39,7 +39,7 @@ This document outlines the finished and unfinished tasks for the **macOS Multi-T
 ## 🚧 Unfinished Tasks / Future Roadmap
 
 ### 🔮 Planned Features (v2.1.0+)
-- [ ] **GUI Interface**: Build a native macOS UI (using `tkinter` or `pyobjc`).
+- [x] **GUI Interface**: Build a native macOS UI (using `tkinter` or `pyobjc`). *Prototype Implemented via `--gui`.*
 - [ ] **Apple Silicon Optimization**: Specific tweaks for M1/M2/M3 chips (though currently compatible via Rosetta/Universal binaries).
 - [x] **Mist Integration**: Fully automate the *downloading* of installers inside the app using `mist-cli` integration.
 - [x] **Update Existing USB**: Allow adding new installers to an existing multi-boot drive without reformatting.

@@ -11,7 +11,7 @@ import time
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import privilege, constants
+from core import privilege, constants, config
 from detection import installer_scanner, stub_validator, disk_detector
 from safety import boot_disk_guard, backup_manager
 from operations import partitioner, installer_runner, branding, updater, download_mode
@@ -50,14 +50,15 @@ def check_dependencies():
             print(f"  ⚠  {tool}")
         print()
 
-def mode_create_new():
+def mode_create_new(cfg: config.Config):
     """Mode 1: Create new multi-boot USB."""
     display.print_header("CREATE NEW MULTI-BOOT USB")
 
     # Step 1: Scan for installers
     while True:
         display.print_step(1, 5, "Scanning for macOS installers")
-        installers = installer_scanner.scan_for_installers()
+        custom_paths = [cfg.app_dir] if cfg.app_dir else None
+        installers = installer_scanner.scan_for_installers(search_paths=custom_paths)
 
         if not installers:
             display.print_error("No macOS installers found!")
@@ -431,18 +432,32 @@ def mode_update_existing():
 
 def main():
     """Main entry point."""
-    # Simple argument parsing
-    if "-h" in sys.argv or "--help" in sys.argv:
-        help.print_usage(VERSION)
+    # Argument parsing
+    import argparse
+    parser = argparse.ArgumentParser(description=f"macOS Multi-Tool Pro v{VERSION}")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate operations without making changes")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--app-dir", type=str, help="Custom path to search for installers")
+    parser.add_argument("--gui", action="store_true", help="Launch Graphical User Interface")
+
+    args = parser.parse_args()
+
+    # Create config object
+    cfg = config.Config()
+    cfg.dry_run = args.dry_run
+    cfg.debug = args.debug
+    cfg.app_dir = args.app_dir
+    cfg.gui_mode = args.gui
+
+    if cfg.gui_mode:
+        from ui import gui_tkinter
+        gui_tkinter.launch(cfg)
         sys.exit(0)
 
-    # Parse arguments
-    dry_run = "--dry-run" in sys.argv
-
-    if dry_run:
+    if cfg.dry_run:
         display.print_warning("DRY RUN MODE - No changes will be made")
 
-    # Ensure root
+    # Ensure root (unless dry run? No, scanning might need perms, keeping it safe)
     privilege.ensure_root()
     privilege.start_keepalive()
 
@@ -465,10 +480,10 @@ def main():
     )
 
     if choice == 0:
-        if dry_run:
+        if cfg.dry_run:
             display.print_info("Would create new multi-boot USB (dry run)")
         else:
-            mode_create_new()
+            mode_create_new(cfg)
 
     elif choice == 1:
         mode_update_existing()

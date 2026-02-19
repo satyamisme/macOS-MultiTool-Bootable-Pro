@@ -77,3 +77,39 @@ def download_installer(os_name, version=None):
 
     result = subprocess.run(cmd)
     return result.returncode == 0
+
+def get_installer_size(search_term):
+    """
+    Get the estimated size of an installer from Mist.
+
+    Args:
+        search_term: macOS name or version
+
+    Returns:
+        int: Size in bytes, or None if not found
+    """
+    if not check_mist_available():
+        return None
+
+    try:
+        # mist list installer <search-term> --output-type json
+        # Newer mist versions support json output for parsing
+        cmd = ['mist', 'list', 'installer', search_term, '--output-type', 'json', '--quiet']
+        result = subprocess.run(cmd, capture_output=True, text=True)
+
+        if result.returncode != 0:
+            return None
+
+        import json
+        data = json.loads(result.stdout)
+
+        if not data:
+            return None
+
+        # Get the first match
+        first_match = data[0]
+        return first_match.get('size', 0)
+
+    except Exception as e:
+        print(f"Error querying mist size: {e}")
+        return None
