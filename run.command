@@ -68,6 +68,8 @@ source "$VENV_DIR/bin/activate"
 # Install dev dependencies (if any needed for runtime, though mostly standard lib)
 if [ -f "requirements.txt" ]; then
     echo "Installing/Updating dependencies..."
+    # Upgrade pip first to avoid issues with old versions
+    pip install -q --upgrade pip
     pip install -q -r requirements.txt
 fi
 
