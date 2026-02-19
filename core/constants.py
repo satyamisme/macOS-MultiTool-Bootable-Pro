@@ -38,6 +38,10 @@ def calculate_partition_size(installer_size_kb: int, version_string: str) -> int
     # Convert to GB
     installer_gb = float(installer_size_kb) / (1024 * 1024)
 
+    # If the installer is suspiciously small (stub) but we accepted it via force override,
+    # or if it's a mist download placeholder, we might want to check a default min size.
+    # But usually size_kb comes from the actual app.
+
     # Get version key
     version_key = _extract_version_key(version_string)
 
