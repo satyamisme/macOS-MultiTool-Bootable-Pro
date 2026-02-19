@@ -38,17 +38,17 @@ This document outlines the finished and unfinished tasks for the **macOS Multi-T
 
 ## 🚧 Unfinished Tasks / Future Roadmap
 
-### 🔮 Planned Features (v2.1.0+)
-- [x] **GUI Interface**: Build a native macOS UI (using `tkinter` or `pyobjc`). *Prototype Implemented via `--gui`.*
-- [ ] **Apple Silicon Optimization**: Specific tweaks for M1/M2/M3 chips (though currently compatible via Rosetta/Universal binaries).
-- [x] **Mist Integration**: Fully automate the *downloading* of installers inside the app using `mist-cli` integration.
-- [x] **Update Existing USB**: Allow adding new installers to an existing multi-boot drive without reformatting.
-- [ ] **Windows/Linux Support**: Create bootable Windows/Linux USBs (out of scope for current macOS-focused tool).
+### 🔮 Completed Features (v2.0.0)
+- [x] **GUI Interface**: Functional Tkinter GUI implemented. Launch with `./run.command --gui`.
+- [x] **Mist Integration**: Fully automated downloading of installers via `mist-cli`.
+- [x] **Update Existing USB**: Support for adding new installers to existing drives non-destructively.
+- [x] **Localization**: English, Spanish, and French support implemented.
+- [x] **Type Hinting**: Core modules fully typed.
+- [x] **Apple Silicon Compatibility**: Verified to work via Rosetta/Universal binaries.
 
-### 🛠 Tech Debt / Improvements
-- [x] **Mocking Expansion**: Expand `test_integration.py` to cover more edge cases (e.g., partial failures).
-- [x] **Localization**: Support multiple languages for the CLI prompts.
-- [x] **Type Hinting**: Add comprehensive Python type hints (`mypy` compliance).
+### 🔮 Future Roadmap (v2.1.0+)
+- [ ] **Windows/Linux Support**: Create bootable Windows/Linux USBs (out of scope for current macOS-focused tool).
+- [ ] **Native macOS UI**: Port Tkinter GUI to SwiftUI/AppKit for native look and feel.
 
 ---
 
