@@ -42,13 +42,13 @@ This document outlines the finished and unfinished tasks for the **macOS Multi-T
 - [ ] **GUI Interface**: Build a native macOS UI (using `tkinter` or `pyobjc`).
 - [ ] **Apple Silicon Optimization**: Specific tweaks for M1/M2/M3 chips (though currently compatible via Rosetta/Universal binaries).
 - [x] **Mist Integration**: Fully automate the *downloading* of installers inside the app using `mist-cli` integration.
-- [ ] **Update Existing USB**: Allow adding new installers to an existing multi-boot drive without reformatting.
+- [x] **Update Existing USB**: Allow adding new installers to an existing multi-boot drive without reformatting.
 - [ ] **Windows/Linux Support**: Create bootable Windows/Linux USBs (out of scope for current macOS-focused tool).
 
 ### 🛠 Tech Debt / Improvements
-- [ ] **Mocking Expansion**: Expand `test_integration.py` to cover more edge cases (e.g., partial failures).
-- [ ] **Localization**: Support multiple languages for the CLI prompts.
-- [ ] **Type Hinting**: Add comprehensive Python type hints (`mypy` compliance).
+- [x] **Mocking Expansion**: Expand `test_integration.py` to cover more edge cases (e.g., partial failures).
+- [x] **Localization**: Support multiple languages for the CLI prompts.
+- [x] **Type Hinting**: Add comprehensive Python type hints (`mypy` compliance).
 
 ---
 

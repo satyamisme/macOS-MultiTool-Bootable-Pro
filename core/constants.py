@@ -23,7 +23,7 @@ HFS_OVERHEAD_MULTIPLIER = 0.10  # 10% overhead for HFS+
 BOOT_FILES_GB = 1.0              # Space for boot files
 MIN_PARTITION_GB = 5             # Minimum partition size
 
-def calculate_partition_size(installer_size_kb, version_string):
+def calculate_partition_size(installer_size_kb: int, version_string: str) -> int:
     """
     Calculate required partition size with future-proof buffer.
 

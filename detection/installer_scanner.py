@@ -14,7 +14,9 @@ DEFAULT_SEARCH_PATHS = [
     os.path.expanduser("~/Desktop")
 ]
 
-def scan_for_installers(search_paths=None):
+from typing import List, Dict, Optional, Any
+
+def scan_for_installers(search_paths: Optional[List[str]] = None) -> List[Dict[str, Any]]:
     """
     Scan filesystem for macOS installer applications.
 
