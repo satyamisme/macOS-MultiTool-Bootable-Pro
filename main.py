@@ -50,14 +50,23 @@ def check_dependencies():
             print(f"  ⚠  {tool}")
         print()
 
-def mode_create_new():
+def mode_create_new(args):
     """Mode 1: Create new multi-boot USB."""
+    global ARGS
+    ARGS = args
     display.print_header("CREATE NEW MULTI-BOOT USB")
 
     # Step 1: Scan for installers
     while True:
         display.print_step(1, 5, "Scanning for macOS installers")
-        installers = installer_scanner.scan_for_installers()
+        # Use custom app-dir if provided via global args (need to pass it down)
+        # We need to access 'args' here. Refactoring mode_create_new to accept args or use global.
+        # For simplicity in this script, we'll use the global args variable if we make it available,
+        # or pass it.
+        # Let's pass it. But mode_create_new is called without args.
+        # I'll modify mode_create_new signature.
+        custom_paths = [ARGS.app_dir] if ARGS.app_dir else None
+        installers = installer_scanner.scan_for_installers(search_paths=custom_paths)
 
         if not installers:
             display.print_error("No macOS installers found!")
@@ -431,18 +440,21 @@ def mode_update_existing():
 
 def main():
     """Main entry point."""
-    # Simple argument parsing
-    if "-h" in sys.argv or "--help" in sys.argv:
-        help.print_usage(VERSION)
-        sys.exit(0)
+    # Argument parsing
+    import argparse
+    parser = argparse.ArgumentParser(description=f"macOS Multi-Tool Pro v{VERSION}")
+    parser.add_argument("--dry-run", action="store_true", help="Simulate operations without making changes")
+    parser.add_argument("--debug", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--app-dir", type=str, help="Custom path to search for installers")
 
-    # Parse arguments
-    dry_run = "--dry-run" in sys.argv
+    args = parser.parse_args()
+
+    dry_run = args.dry_run
 
     if dry_run:
         display.print_warning("DRY RUN MODE - No changes will be made")
 
-    # Ensure root
+    # Ensure root (unless dry run? No, scanning might need perms, keeping it safe)
     privilege.ensure_root()
     privilege.start_keepalive()
 
@@ -468,7 +480,7 @@ def main():
         if dry_run:
             display.print_info("Would create new multi-boot USB (dry run)")
         else:
-            mode_create_new()
+            mode_create_new(args)
 
     elif choice == 1:
         mode_update_existing()

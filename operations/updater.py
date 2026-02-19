@@ -85,65 +85,35 @@ def split_partition(part_id, new_installers):
         print(f"  Adding partition: {part_name} ({size_gb} GB)...")
 
         try:
-            # diskutil addPartition requires an existing partition to split/resize.
-            # Since we deleted the data partition, we have free space.
-            # But diskutil addPartition cannot target "free space" directly or the disk ID easily in all versions.
-            # The most reliable way to add to free space is to resize the container or use 'partitionDisk' with 'resize'.
-            # However, 'addPartition' works if we target the *preceding* partition and ask it to split?
-            # Or if we target the disk ID, it might try to use the free space.
-            # Actually, `diskutil addPartition` expects a PARTITION identifier to split.
-            # If we erased the last partition, we can't "split" it because it's gone.
-            #
-            # ALTERNATIVE STRATEGY:
-            # Instead of `eraseVolume FREE`, we should have resized or just overwritten it.
-            # But since we already deleted it (to allow for potentially multiple new partitions),
-            # we need to recovery.
-            #
-            # BETTER STRATEGY for simplicity:
-            # We just use `partitionDisk` again on the whole disk? No, that wipes everything.
-            # We need to resizing the PREVIOUS partition to fill the space, then split it?
-            # Too risky.
-            #
-            # CORRECT APPROACH for this tool:
-            # If we deleted the partition, we should use `diskutil resizeVolume` on the preceding partition
-            # to claim the space, then split it?
-            # OR, assume the user has a APFS container? No, we use JHFS+.
-            #
-            # Let's fix the immediate crash: target the preceding partition?
-            # But we don't know it easily.
-            #
-            # Actually, if we use `diskutil splitPartition` on the DATA_STORE *before* deleting it, that works better.
-            # But the code structure already deletes it.
-            #
-            # Let's pivot:
-            # Instead of `eraseVolume FREE`, the `delete_partition` should have just formatted it as the first new installer?
-            #
-            # BUT, to fix the specific error "does not appear to be a valid partition identifier":
-            # We will use `diskutil resizeVolume` on the disk ID? No.
-            #
-            # Let's try to target the disk ID with `diskutil splitPartition`? No.
-            #
-            # If we assume we are at the end of the disk (DATA_STORE is usually last),
-            # maybe we can find the free space gap?
-            #
-            # For this version, let's revert to a safer approach:
-            # Reformat the EXISTING DATA_STORE partition to the new installer (if it fits).
-            # If we have multiple installers, we need to split it.
-            #
-            # So:
-            # 1. Don't delete DATA_STORE in step 1.
-            # 2. Use `diskutil splitPartition` on DATA_STORE to create [NewInstaller, NewDataStore].
-            # 3. Loop.
-            #
-            # This requires refactoring `main.py` and `updater.py`.
-            #
-            # Given the constraints and the review feedback, I will implement `splitPartition` logic
-            # inside `add_partitions` assuming `disk_id` passed here IS the data partition ID.
-            # Wait, `add_partitions` currently receives the `disk_id` (e.g. disk2).
-            #
-            # I will modify `main.py` to NOT delete the partition, but pass the partition ID to `add_partitions`.
-            pass
-            result = subprocess.check_output(cmd, text=True)
+            # We need to know the next partition ID. diskutil usually increments it.
+            # If we split disk2s5, we typically get disk2s5 (new) and disk2s6 (remainder).
+
+            cmd = [
+                'sudo', 'diskutil', 'splitPartition',
+                current_part,
+                '2',
+                'JHFS+', part_name, f"{size_gb}G",
+                'ExFAT', 'DATA_STORE', 'R'
+            ]
+
+            output = subprocess.check_output(cmd, text=True)
+            print("  ✓ Split successful")
+
+            new_partitions.append({'name': part_name, 'installer': installer})
+
+            # The "DATA_STORE" partition is now the new last partition.
+            # We need to find its identifier to split it again for the next installer.
+            # We can't easily guess it (it might be s6, s7).
+            # We must re-scan to find "DATA_STORE".
+
+            if i < len(new_installers) - 1:
+                # Find new DATA_STORE ID
+                structure = get_drive_structure(current_part.split('s')[0]) # pass 'disk2'
+                if structure and structure['data_partition']:
+                    current_part = structure['data_partition']['id']
+                else:
+                    print("  ❌ Could not find DATA_STORE after split")
+                    return new_partitions # Partial success
 
             # The command output usually ends with details of the new disk
             # e.g., "Finished partition on disk2s5"

@@ -28,6 +28,14 @@ TRANSLATIONS = {
         "error_no_installers": "¡No se encontraron instaladores de macOS!",
         "prompt_select_drive": "Seleccionar unidad USB",
         "confirm_erase": "Escriba 'ERASE' para confirmar",
+    },
+    "fr": {
+        "header_create": "CRÉER UNE CLÉ USB MULTI-BOOT",
+        "header_update": "METTRE À JOUR LA CLÉ USB EXISTANTE",
+        "error_root": "Privilèges root requis. Élévation...",
+        "error_no_installers": "Aucun installateur macOS trouvé !",
+        "prompt_select_drive": "Sélectionner le disque USB",
+        "confirm_erase": "Tapez 'ERASE' pour confirmer",
     }
 }
 
