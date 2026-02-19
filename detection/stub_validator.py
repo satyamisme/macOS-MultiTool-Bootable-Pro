@@ -46,13 +46,27 @@ def is_stub_installer(app_path):
         # Final fallback: Check total app size. If > 4GB, it's likely a full installer
         # even if internal structure is non-standard.
         try:
-            total_size_mb = int(subprocess.check_output(
-                ['du', '-sk', app_path], stderr=subprocess.DEVNULL
-            ).split()[0]) / 1024
+            # Check for alternate location: Contents/SharedSupport.dmg (file directly in Contents)
+            alt_shared_support = os.path.join(app_path, "Contents/SharedSupport.dmg")
+            if os.path.exists(alt_shared_support) and os.path.getsize(alt_shared_support) > 4 * 1024 * 1024 * 1024:
+                return False
+
+            # Check total bundle size using du
+            # On macOS, du -sk returns size in 1024-byte blocks
+            output = subprocess.check_output(
+                ['du', '-sk', app_path],
+                stderr=subprocess.DEVNULL,
+                encoding='utf-8' # Ensure string output
+            )
+            total_size_kb = int(output.split()[0])
+            total_size_mb = total_size_kb / 1024
 
             if total_size_mb > 4000:  # 4GB
                 return False
-        except:
+        except Exception as e:
+            # If du fails, we can't determine size, so assume stub to be safe?
+            # Or print debug info? For production, safe default is True (Stub).
+            print(f"DEBUG: Stub validation error: {e}")
             pass
 
         return True
