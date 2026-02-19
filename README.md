@@ -69,12 +69,18 @@ This will check:
     ./run.command
     ```
 
-2.  **Run Manually (Advanced)**:
+2.  **Launch Graphical Interface (GUI)**:
+    ```bash
+    ./run.command --gui
+    ```
+    This launches a visual interface for selecting drives and installers.
+
+3.  **Run Manually (Advanced)**:
     ```bash
     sudo ./main.py
     ```
 
-3.  **Follow the interactive prompts**:
+4.  **Follow the interactive prompts**:
     - **Step 1**: The tool scans for available installers. Select which ones you want to include.
     - **Step 2**: Select the target USB drive from the list of safe, external options.
     - **Step 3**: Confirm the destructive operation by typing `ERASE`.

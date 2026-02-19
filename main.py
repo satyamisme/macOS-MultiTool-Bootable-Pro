@@ -113,6 +113,8 @@ def mode_create_new(cfg: config.Config):
 
     if not valid_installers:
         display.print_error("No valid full installers available")
+        # Ensure 'continue' is inside the main 'while True' loop
+        # This block is inside 'while True', so 'continue' is valid.
         if prompts.prompt_yes_no("Download a macOS installer now?"):
              mode_download_installer()
              continue
@@ -120,14 +122,18 @@ def mode_create_new(cfg: config.Config):
              return
 
     # Step 2: Select USB drive
-    display.print_step(2, 5, "Detecting USB drives")
-    usb_drives = disk_detector.get_external_usb_drives()
+    while True:
+        display.print_step(2, 5, "Detecting USB drives")
+        usb_drives = disk_detector.get_external_usb_drives()
 
-    if not usb_drives:
-        display.print_error("No external USB drives detected!")
-        sys.exit(1)
+        if not usb_drives:
+            display.print_error("No external USB drives detected!")
+            if not prompts.prompt_yes_no("Rescan?", 'y'):
+                return
+            continue
 
-    print(f"\nFound {len(usb_drives)} USB drive(s):\n")
+        print(f"\nFound {len(usb_drives)} USB drive(s):\n")
+        break
 
     disk_options = []
     for disk in usb_drives:
