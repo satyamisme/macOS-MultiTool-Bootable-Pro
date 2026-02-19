@@ -11,7 +11,7 @@ import time
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from core import privilege, constants
+from core import privilege, constants, config
 from detection import installer_scanner, stub_validator, disk_detector
 from safety import boot_disk_guard, backup_manager
 from operations import partitioner, installer_runner, branding, updater, download_mode
@@ -50,22 +50,14 @@ def check_dependencies():
             print(f"  ⚠  {tool}")
         print()
 
-def mode_create_new(args):
+def mode_create_new(cfg: config.Config):
     """Mode 1: Create new multi-boot USB."""
-    global ARGS
-    ARGS = args
     display.print_header("CREATE NEW MULTI-BOOT USB")
 
     # Step 1: Scan for installers
     while True:
         display.print_step(1, 5, "Scanning for macOS installers")
-        # Use custom app-dir if provided via global args (need to pass it down)
-        # We need to access 'args' here. Refactoring mode_create_new to accept args or use global.
-        # For simplicity in this script, we'll use the global args variable if we make it available,
-        # or pass it.
-        # Let's pass it. But mode_create_new is called without args.
-        # I'll modify mode_create_new signature.
-        custom_paths = [ARGS.app_dir] if ARGS.app_dir else None
+        custom_paths = [cfg.app_dir] if cfg.app_dir else None
         installers = installer_scanner.scan_for_installers(search_paths=custom_paths)
 
         if not installers:
@@ -450,14 +442,19 @@ def main():
 
     args = parser.parse_args()
 
-    if args.gui:
+    # Create config object
+    cfg = config.Config()
+    cfg.dry_run = args.dry_run
+    cfg.debug = args.debug
+    cfg.app_dir = args.app_dir
+    cfg.gui_mode = args.gui
+
+    if cfg.gui_mode:
         from ui import gui_tkinter
-        gui_tkinter.launch()
+        gui_tkinter.launch(cfg)
         sys.exit(0)
 
-    dry_run = args.dry_run
-
-    if dry_run:
+    if cfg.dry_run:
         display.print_warning("DRY RUN MODE - No changes will be made")
 
     # Ensure root (unless dry run? No, scanning might need perms, keeping it safe)
@@ -483,10 +480,10 @@ def main():
     )
 
     if choice == 0:
-        if dry_run:
+        if cfg.dry_run:
             display.print_info("Would create new multi-boot USB (dry run)")
         else:
-            mode_create_new(args)
+            mode_create_new(cfg)
 
     elif choice == 1:
         mode_update_existing()

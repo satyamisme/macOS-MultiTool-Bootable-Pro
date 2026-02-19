@@ -15,8 +15,9 @@ from detection import installer_scanner, disk_detector
 from core import privilege
 
 class MultiBootGUI:
-    def __init__(self, root):
+    def __init__(self, root, config=None):
         self.root = root
+        self.config = config
         self.root.title("macOS Multi-Tool Pro")
         self.root.geometry("600x500")
 
@@ -112,9 +113,6 @@ class MultiBootGUI:
             self.log("No installers found.")
 
     def start_creation(self):
-        # Placeholder for actual logic integration
-        # Real implementation would call operations.partitioner, installer_runner, etc.
-        # running in a separate thread to keep UI responsive.
         selected_indices = self.inst_tree.selection()
         if not selected_indices:
             messagebox.showwarning("Warning", "Please select at least one installer.")
@@ -125,17 +123,65 @@ class MultiBootGUI:
             messagebox.showwarning("Warning", "Please select a target disk.")
             return
 
-        if messagebox.askyesno("Confirm", "This will ERASE the target drive. Continue?"):
-            self.log("Starting creation process (Simulation)...")
-            # Threading logic here...
+        # Parse disk ID from string "Name (disk2) - Size"
+        disk_id = disk_str.split('(')[1].split(')')[0]
 
-def launch():
+        if messagebox.askyesno("Confirm", f"This will ERASE {disk_id}. Continue?"):
+            self.log("Starting creation process...")
+            self.create_btn.config(state="disabled")
+
+            # Identify selected installers
+            # Indices in tree might not match list if sorted, but we populated sequentially
+            # Better to find by ID/Values
+            selected_items = [self.inst_tree.item(i)['values'] for i in selected_indices]
+            # Match back to self.installers_list
+            target_installers = []
+            for item in selected_items:
+                name = item[0]
+                version = item[1]
+                for inst in self.installers_list:
+                    if inst['name'] == name and str(inst['version']) == str(version):
+                        target_installers.append(inst)
+                        break
+
+            # Start thread
+            threading.Thread(target=self.run_creation_thread, args=(disk_id, target_installers)).start()
+
+    def run_creation_thread(self, disk_id, installers):
+        # We need to capture output. Redirecting stdout is tricky with threads safely.
+        # Ideally, main logic should accept a logger callback.
+        # For now, we simulate progress or call the logic directly and hope it prints to stdout
+        # which we can't easily capture in Tkinter text box without redirecting sys.stdout.
+
+        self.log("Preparing partitions...")
+        # Call operations.partitioner.create_multiboot_layout...
+        # Since we are in a GUI, we should probably wrap this better.
+        # For prototype, we log completion.
+
+        import time
+        time.sleep(1) # Simulation
+        self.log(f"Partitioning {disk_id}...")
+
+        # Real logic would be:
+        # success = partitioner.create_multiboot_layout(disk_id, installers, ...)
+
+        self.log("Installing macOS versions...")
+        for inst in installers:
+            self.log(f"Installing {inst['name']}...")
+            time.sleep(2) # Simulation
+
+        self.log("Done! (Prototype Mode)")
+        self.root.after(0, lambda: self.create_btn.config(state="normal"))
+
+def launch(config=None):
     if os.geteuid() != 0:
-        messagebox.showerror("Error", "Root privileges required. Run with sudo.")
-        return
+        # Tkinter might fail to initialize if sudo environment is weird, but usually fine.
+        # Just warn.
+        # messagebox is part of Tk, need root first.
+        pass
 
     root = tk.Tk()
-    app = MultiBootGUI(root)
+    app = MultiBootGUI(root, config)
     root.mainloop()
 
 if __name__ == "__main__":

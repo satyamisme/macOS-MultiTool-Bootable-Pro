@@ -72,6 +72,8 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
     except subprocess.CalledProcessError as e:
         print(f"❌ Partitioning failed!")
         print(f"Error: {e.stderr}")
+        # In a real app, we might raise a custom exception here
+        # raise PartitioningError(e.stderr)
         return False
 
 def get_partition_list(disk_id):
