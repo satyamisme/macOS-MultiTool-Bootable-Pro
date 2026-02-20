@@ -341,7 +341,7 @@ class MultiBootGUI:
                     self.log(f"Installation of {inst['name']} failed.")
 
             self.log("All operations complete.")
-            messagebox.showinfo("Success", "Multi-Boot USB Created Successfully!")
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Multi-Boot USB Created Successfully!"))
 
         except Exception as e:
             self.log(f"Critical Error: {e}")
