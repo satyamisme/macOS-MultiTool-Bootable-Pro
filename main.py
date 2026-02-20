@@ -17,6 +17,7 @@ from safety import boot_disk_guard, backup_manager
 from operations import partitioner, installer_runner, branding, updater, download_mode
 from integration import mist_downloader
 from ui import display, prompts, progress, help
+from utils import logger
 
 VERSION = "2.0.0"
 
@@ -459,6 +460,9 @@ def main():
         from ui import gui_tkinter
         gui_tkinter.launch(cfg)
         sys.exit(0)
+
+    # Initialize logging
+    logger.setup_logging(verbose=cfg.debug)
 
     if cfg.dry_run:
         display.print_warning("DRY RUN MODE - No changes will be made")
