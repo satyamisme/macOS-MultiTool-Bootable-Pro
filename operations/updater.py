@@ -115,14 +115,6 @@ def split_partition(part_id, new_installers):
                     print("  ❌ Could not find DATA_STORE after split")
                     return new_partitions # Partial success
 
-            # The command output usually ends with details of the new disk
-            # e.g., "Finished partition on disk2s5"
-            # But let's verify by checking the list or assuming sequential order?
-            # Safer to rely on the name matching later or verify checking list.
-
-            # For now, let's assume it worked.
-            new_partitions.append({'name': part_name, 'installer': installer})
-
         except subprocess.CalledProcessError as e:
             print(f"  ❌ Failed to add partition for {installer['name']}: {e}")
             return None
