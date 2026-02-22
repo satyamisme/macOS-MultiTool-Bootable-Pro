@@ -42,6 +42,7 @@ class MultiBootGUI:
 
         # UI State
         self.show_all_disks_var = tk.BooleanVar(value=False)
+        self.update_mode = False # Add new content vs Erase
 
         # Layout
         self.create_widgets()
@@ -169,6 +170,9 @@ class MultiBootGUI:
         self.buffer_label.pack(side="left", padx=5)
         self.buffer_scale.configure(command=self.on_buffer_change)
 
+        # Optimize Density Button
+        ttk.Button(buffer_frame, text="Optimize Density (Min Buffers)", command=self.optimize_buffers).pack(side="right", padx=10)
+
         # Intelligent Space Panel
         self.space_label = ttk.Label(settings_frame, text="Required: 0.0 GB | Available: 0.0 GB | Select Installers & Disk", font=("Arial", 10, "bold"))
         self.space_label.pack(fill="x", padx=10, pady=10)
@@ -189,6 +193,24 @@ class MultiBootGUI:
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
 
     # --- Event Handlers & Logic ---
+
+    def optimize_buffers(self):
+        # Set all buffers to minimal (0.2 GB)
+        MIN_SAFE_BUFFER = 0.2
+        self.buffer_var.set(MIN_SAFE_BUFFER)
+        self.on_buffer_change(MIN_SAFE_BUFFER)
+
+        # Also update custom buffers map for selected items specifically to override any previous custom values
+        for item in self.inst_tree.get_children():
+            values = self.inst_tree.item(item)['values']
+            name = values[1]
+            ver = str(values[2])
+            key = f"{name}_{ver}"
+            self.custom_buffers[key] = MIN_SAFE_BUFFER
+            self.inst_tree.set(item, "Buffer", f"{MIN_SAFE_BUFFER:.1f} GB")
+
+        self.update_space_usage()
+        messagebox.showinfo("Optimized", "Buffers set to minimum (0.2 GB) for maximum density.")
 
     def on_tree_click(self, event):
         region = self.inst_tree.identify("region", event.x, event.y)
@@ -281,31 +303,15 @@ class MultiBootGUI:
         selected_items = self.get_selected_installers()
 
         # Calculate Total Required using Partitioner Logic
-        total_required_gb = 0.0
+        total_required_mb = 0.0
 
-        # Start with EFI (1GB fixed in partitioner usually, though constants says BOOT_FILES_GB=1.0)
-        # partitioner logic: EFI (1GB) + Installers + Data
-        # constants.BOOT_FILES_GB is included in calculate_partition_size?
-        # Checking constants.py: total_gb = installer + overhead + BOOT_FILES_GB + buffer
-        # Wait, BOOT_FILES_GB in constants is 1.0. Does this mean per partition?
-        # No, partitioner creates ONE EFI partition for the disk.
-        # But calculate_partition_size is used for EACH installer partition.
-        # Let's double check partitioner.py logic (from memory/previous steps):
-        # It calls calculate_partition_size for each installer.
-        # So it sums up: (Size + Overhead + 1.0 + Buffer).
-        # This seems redundant if EFI is separate.
-        # But `create_multiboot_layout` likely sums these up.
-
-        # Let's align exactly with updated constants.py which I just wrote.
-        # It adds BOOT_FILES_GB (1.0) to every partition.
-        # This might be overkill if intended for the single EFI, but it's safe.
+        # EFI is 1024 MB in partitioner.py (fixed)
+        total_required_mb += 1024
 
         # Visualization Data
         segments = []
-
-        # Add EFI segment (Always first, ~200MB - 1GB)
-        segments.append({"name": "EFI", "size": 0.2, "color": "gray"})
-        total_required_gb += 0.2
+        # Add EFI segment
+        segments.append({"name": "EFI", "size": 1024, "color": "gray"})
 
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
@@ -325,17 +331,24 @@ class MultiBootGUI:
                 buffer_gb = float(values[4].split()[0])
             except: buffer_gb = 2.0
 
-            # Use Core Logic
-            part_size = constants.calculate_partition_size(size_kb, version, override_buffer_gb=buffer_gb)
+            # Use Core Logic (MB precision)
+            part_size_mb = constants.calculate_partition_size(size_kb, version, override_buffer_gb=buffer_gb)
 
-            total_required_gb += part_size
-            segments.append({"name": name, "size": part_size, "color": "#4a90e2"})
+            total_required_mb += part_size_mb
+            segments.append({"name": name, "size": part_size_mb, "color": "#4a90e2"})
 
-        self.total_required_gb = total_required_gb
+        self.total_required_gb = total_required_mb / 1024.0
 
         # Available Space
         disk_str = self.selected_disk.get()
         available_gb = 0.0
+
+        # We need to know if there's free space (for Update mode logic, though mostly we erase)
+        # But `diskutil info` via detector only gives total size.
+        # `updater.get_drive_structure` gives free space.
+        # For simplicity, if we are in "Create" mode (default), available is Total Disk Size.
+        # If we added an "Update" checkbox, we would check free space.
+
         if disk_str and "No external" not in disk_str:
             try:
                 size_part = disk_str.split(' - ')[1]
@@ -345,9 +358,11 @@ class MultiBootGUI:
         self.current_disk_size_gb = available_gb
 
         # Add Data Partition Segment if space remains
-        if available_gb > total_required_gb:
-            rem = available_gb - total_required_gb
-            segments.append({"name": "DATA", "size": rem, "color": "#50e3c2"})
+        available_mb = available_gb * 1024
+        if available_mb > total_required_mb:
+            rem_mb = available_mb - total_required_mb
+            # Show remaining as "Free / Data"
+            segments.append({"name": "Free/Data", "size": rem_mb, "color": "#50e3c2"}) # Solid color for now
 
         # Update Label
         color = "black"
@@ -369,29 +384,36 @@ class MultiBootGUI:
             status_text = "Select Installers"
 
         self.space_label.config(
-            text=f"Required: {self.total_required_gb:.1f} GB | Capacity: {available_gb:.1f} GB | {status_text}",
+            text=f"Required: {self.total_required_gb:.2f} GB | Available: {available_gb:.2f} GB | {status_text}",
             foreground=color
         )
 
-        self.draw_viz(segments, available_gb)
+        self.draw_viz(segments, available_mb)
 
-    def draw_viz(self, segments, total_capacity):
+    def draw_viz(self, segments, total_capacity_mb):
         self.viz_canvas.delete("all")
-        if total_capacity <= 0: return
+        if total_capacity_mb <= 0: return
 
         w = self.viz_canvas.winfo_width()
         h = self.viz_canvas.winfo_height()
-        # Fallback if unmapped
         if w < 10: w = 900
 
         current_x = 0
-        scale = w / total_capacity
+        scale = w / total_capacity_mb
 
         for seg in segments:
             width = seg["size"] * scale
-            self.viz_canvas.create_rectangle(current_x, 0, current_x + width, h, fill=seg["color"], outline="white")
-            if width > 30: # Only text if wide enough
-                self.viz_canvas.create_text(current_x + width/2, h/2, text=f"{seg['name'][:10]}", fill="black", font=("Arial", 8))
+            color = seg["color"]
+
+            # Simple rectangle
+            self.viz_canvas.create_rectangle(current_x, 0, current_x + width, h, fill=color, outline="white")
+
+            # Text label if wide enough
+            if width > 40:
+                name_short = seg['name'][:10]
+                if seg['name'] == "Free/Data": name_short = "Free"
+                self.viz_canvas.create_text(current_x + width/2, h/2, text=name_short, fill="black", font=("Arial", 8))
+
             current_x += width
 
     def refresh_hardware(self):
@@ -399,7 +421,6 @@ class MultiBootGUI:
         show_all = self.show_all_disks_var.get()
 
         try:
-            # Pass show_all to detector
             drives = disk_detector.get_external_usb_drives(show_all=show_all)
             options = []
             if drives:
@@ -652,7 +673,7 @@ class MultiBootGUI:
             for inst in self.installers_list:
                 if inst['name'] == name and str(inst['version']) == version:
                     found = inst.copy()
-                    found['buffer_gb'] = buffer_val # Inject custom buffer
+                    found['buffer_gb'] = buffer_val
                     break
             if found: target_installers.append(found)
 
@@ -677,10 +698,6 @@ class MultiBootGUI:
             total_size_gb = struct['disk_size'] / 1e9 if struct else 0
 
             self.log(f"Partitioning {disk_id}...")
-
-            # Pass custom buffers is now handled because partitioner calls calculate_partition_size
-            # But wait, partitioner calls it with (size_kb, version). It doesn't pass buffer_gb.
-            # We need to update partitioner.py to pass the buffer if present in installer dict.
 
             success = partitioner.create_multiboot_layout(disk_id, installers, total_size_gb)
 
