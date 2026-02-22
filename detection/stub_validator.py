@@ -20,72 +20,84 @@ def is_stub_installer(app_path):
     Returns:
         bool: True if stub, False if full installer
     """
-    # Check SharedSupport.dmg
+    is_full = False
+
+    # 1. Check SharedSupport.dmg (Modern macOS)
     shared_support = os.path.join(
         app_path,
         "Contents/SharedSupport/SharedSupport.dmg"
     )
 
-    if not os.path.exists(shared_support):
-        return True
+    if os.path.exists(shared_support):
+        size_mb = os.path.getsize(shared_support) / (1024 * 1024)
+        if size_mb > STUB_THRESHOLD_MB:
+            return False  # It has a large SharedSupport.dmg, so it's FULL.
 
-    size_mb = os.path.getsize(shared_support) / (1024 * 1024)
-
-    # 50MB is safe, but let's be more robust
-    if size_mb < STUB_THRESHOLD_MB:
-        return True
-
-    # Additional check: BaseSystem.dmg (for older installers)
+    # 2. Check BaseSystem.dmg (Older macOS like High Sierra)
     base_system = os.path.join(
         app_path,
         "Contents/SharedSupport/BaseSystem.dmg"
     )
 
-    # If neither exists, it's a stub
-    if not os.path.exists(base_system) and size_mb < MINIMUM_SHARED_SUPPORT_MB:
-        # Final fallback: Check total app size. If > 4GB, it's likely a full installer
-        # even if internal structure is non-standard.
-        try:
-            # Check for alternate location: Contents/SharedSupport.dmg (file directly in Contents)
-            alt_shared_support = os.path.join(app_path, "Contents/SharedSupport.dmg")
-            if os.path.exists(alt_shared_support) and os.path.getsize(alt_shared_support) > 4 * 1024 * 1024 * 1024:
-                return False
+    if os.path.exists(base_system):
+        size_mb = os.path.getsize(base_system) / (1024 * 1024)
+        if size_mb > STUB_THRESHOLD_MB:
+            return False  # BaseSystem exists and is large enough.
 
-            # Check total bundle size using du
-            # On macOS, du -sk returns size in 1024-byte blocks
-            output = subprocess.check_output(
-                ['du', '-sk', app_path],
-                stderr=subprocess.DEVNULL,
-                encoding='utf-8' # Ensure string output
-            )
-            total_size_kb = int(output.split()[0])
-            total_size_mb = total_size_kb / 1024
+    # 3. Check InstallESD.dmg (Even older, Lion/Mountain Lion)
+    install_esd = os.path.join(
+        app_path,
+        "Contents/SharedSupport/InstallESD.dmg"
+    )
 
-            if total_size_mb > 4000:  # 4GB
-                return False
-        except Exception as e:
-            # If du fails, we can't determine size, so assume stub to be safe?
-            # Or print debug info? For production, safe default is True (Stub).
-            print(f"DEBUG: Stub validation error: {e}")
-            pass
+    if os.path.exists(install_esd):
+        size_mb = os.path.getsize(install_esd) / (1024 * 1024)
+        if size_mb > STUB_THRESHOLD_MB:
+            return False
 
-        return True
+    # 4. Fallback: Check Total Bundle Size
+    # If any internal component check failed or was skipped, check the total size.
+    # A full installer is typically > 4GB.
+    try:
+        # Check for alternate location: Contents/SharedSupport.dmg (rare but possible)
+        alt_shared_support = os.path.join(app_path, "Contents/SharedSupport.dmg")
+        if os.path.exists(alt_shared_support) and os.path.getsize(alt_shared_support) > 4 * 1024 * 1024 * 1024:
+            return False
 
-    return False
+        # Check total bundle size using du
+        output = subprocess.check_output(
+            ['du', '-sk', app_path],
+            stderr=subprocess.DEVNULL,
+            encoding='utf-8' # Ensure string output
+        )
+        total_size_kb = int(output.split()[0])
+        total_size_mb = total_size_kb / 1024
+
+        if total_size_mb > 4000:  # 4GB
+            return False
+
+    except Exception as e:
+        # If du fails, we can't determine size.
+        # Since specific file checks failed, we assume it's a stub.
+        pass
+
+    return True
 
 def get_stub_reason(app_path):
     """Get human-readable reason why installer is stub."""
-    shared_support = os.path.join(
-        app_path,
-        "Contents/SharedSupport/SharedSupport.dmg"
-    )
+    # Check total size first as it's the ultimate fallback
+    try:
+        output = subprocess.check_output(
+            ['du', '-sk', app_path],
+            stderr=subprocess.DEVNULL,
+            encoding='utf-8'
+        )
+        total_size_kb = int(output.split()[0])
+        total_size_mb = total_size_kb / 1024
 
-    if not os.path.exists(shared_support):
-        return "SharedSupport.dmg missing"
+        if total_size_mb < 4000:
+             return f"Total size too small ({total_size_mb:.1f} MB)"
+    except:
+        pass
 
-    size_mb = os.path.getsize(shared_support) / (1024 * 1024)
-
-    if size_mb < STUB_THRESHOLD_MB:
-        return f"SharedSupport.dmg too small ({size_mb:.1f} MB)"
-
-    return "BaseSystem.dmg missing"
+    return "Missing payload (SharedSupport.dmg/BaseSystem.dmg)"
