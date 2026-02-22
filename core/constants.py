@@ -24,13 +24,14 @@ HFS_OVERHEAD_MULTIPLIER = 0.10  # 10% overhead for HFS+
 BOOT_FILES_GB = 1.0              # Space for boot files
 MIN_PARTITION_GB = 5             # Minimum partition size
 
-def calculate_partition_size(installer_size_kb: int, version_string: str) -> int:
+def calculate_partition_size(installer_size_kb: int, version_string: str, override_buffer_gb: float = None) -> int:
     """
     Calculate required partition size with future-proof buffer.
 
     Args:
         installer_size_kb: Installer size in kilobytes
         version_string: macOS version (e.g., "14.6.1")
+        override_buffer_gb: Optional custom safety buffer in GB
 
     Returns:
         int: Required partition size in GB (rounded up)
@@ -38,16 +39,16 @@ def calculate_partition_size(installer_size_kb: int, version_string: str) -> int
     # Convert to GB
     installer_gb = float(installer_size_kb) / (1024 * 1024)
 
-    # If the installer is suspiciously small (stub) but we accepted it via force override,
-    # or if it's a mist download placeholder, we might want to check a default min size.
-    # But usually size_kb comes from the actual app.
-
-    # Get version key
-    version_key = _extract_version_key(version_string)
-
-    # Get buffer from database
-    os_info = OS_DATABASE.get(version_key, {"buffer_gb": 1.0})
-    buffer_gb = os_info["buffer_gb"]
+    # Get buffer
+    if override_buffer_gb is not None:
+        buffer_gb = override_buffer_gb
+    else:
+        # Fallback to database or global default
+        version_key = _extract_version_key(version_string)
+        # Check if default_buffer was injected into OS_DATABASE (hack supported for backward compat)
+        default = OS_DATABASE.get("default_buffer", 1.0)
+        os_info = OS_DATABASE.get(version_key, {"buffer_gb": default})
+        buffer_gb = os_info["buffer_gb"]
 
     # Calculate total
     hfs_overhead = installer_gb * HFS_OVERHEAD_MULTIPLIER

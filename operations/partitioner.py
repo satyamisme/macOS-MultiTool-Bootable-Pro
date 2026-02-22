@@ -23,14 +23,22 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
     used_gb = 0
 
     # 1. EFI partition (1GB)
+    # Using JHFS+ for compatibility, though actual ESP is usually FAT32.
+    # diskutil GPT usually creates a hidden ESP at s1.
+    # If we specify EFI_SYSTEM as the first user partition, it becomes s2.
+    # The user asked for an explicit EFI/Boot partition structure.
     partitions.extend(["JHFS+", "EFI_SYSTEM", "1G"])
     used_gb += 1
 
     # 2. macOS installer partitions
     for installer in installers:
+        # Check for custom buffer injected by GUI
+        custom_buffer = installer.get('buffer_gb')
+
         size_gb = constants.calculate_partition_size(
             installer['size_kb'],
-            installer['version']
+            installer['version'],
+            override_buffer_gb=custom_buffer
         )
 
         # Generate partition name
@@ -47,8 +55,6 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
         partitions.extend(["ExFAT", "DATA_STORE", "R"])  # R = remaining
 
     # Build command
-    # Important: partitions list must be triplets (Filesystem, Name, Size)
-    # The list 'partitions' is already built as a flat list of triplets
     cmd = [
         "sudo", "diskutil", "partitionDisk",
         f"/dev/{disk_id}",
@@ -72,8 +78,6 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
     except subprocess.CalledProcessError as e:
         print(f"❌ Partitioning failed!")
         print(f"Error: {e.stderr}")
-        # In a real app, we might raise a custom exception here
-        # raise PartitioningError(e.stderr)
         return False
 
 def get_partition_list(disk_id):
