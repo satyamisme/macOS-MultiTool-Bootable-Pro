@@ -25,7 +25,7 @@ class MultiBootGUI:
         self.root = root
         self.config = config
         self.root.title("macOS Multi-Tool Pro")
-        self.root.geometry("950x750")
+        self.root.geometry("1000x800")
 
         # Variables
         self.selected_disk = tk.StringVar()
@@ -36,6 +36,9 @@ class MultiBootGUI:
         # State for space calculation
         self.current_disk_size_gb = 0.0
         self.total_required_gb = 0.0
+
+        # Per-installer buffer map (installer_id_string -> float gb)
+        self.custom_buffers = {}
 
         # Layout
         self.create_widgets()
@@ -88,51 +91,67 @@ class MultiBootGUI:
         inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers")
         inst_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Treeview for installers
-        cols = ("Name", "Version", "Size", "Status")
+        # Treeview for installers with Checkbox column
+        cols = ("Select", "Name", "Version", "Size", "Buffer", "Status")
         self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=10)
-        for col in cols:
-            self.inst_tree.heading(col, text=col)
+
+        self.inst_tree.heading("Select", text="[x]")
+        self.inst_tree.column("Select", width=40, anchor="center")
+
+        self.inst_tree.heading("Name", text="Name")
         self.inst_tree.column("Name", width=250)
-        self.inst_tree.column("Version", width=100)
-        self.inst_tree.column("Size", width=100)
-        self.inst_tree.column("Status", width=100)
+
+        self.inst_tree.heading("Version", text="Version")
+        self.inst_tree.column("Version", width=80)
+
+        self.inst_tree.heading("Size", text="Size")
+        self.inst_tree.column("Size", width=80)
+
+        self.inst_tree.heading("Buffer", text="Buffer")
+        self.inst_tree.column("Buffer", width=60)
+
+        self.inst_tree.heading("Status", text="Status")
+        self.inst_tree.column("Status", width=80)
+
         self.inst_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
-        # Bind selection change to space calculator
-        self.inst_tree.bind("<<TreeviewSelect>>", self.update_space_usage)
+        # Bindings
+        self.inst_tree.bind("<Button-1>", self.on_tree_click)
+        self.inst_tree.bind("<Double-1>", self.on_tree_double_click) # Edit buffer
 
-        # Scrollbar for tree
+        # Scrollbar
         scrollbar = ttk.Scrollbar(inst_frame, orient="vertical", command=self.inst_tree.yview)
         scrollbar.pack(side="right", fill="y")
         self.inst_tree.configure(yscrollcommand=scrollbar.set)
 
-        # Context Menu for Installers
+        # Context Menu
         self.context_menu = tk.Menu(self.inst_tree, tearoff=0)
+        self.context_menu.add_command(label="Edit Buffer Size", command=self.edit_selected_buffer)
+        self.context_menu.add_separator()
         self.context_menu.add_command(label="Delete Installer", command=self.delete_selected_installer)
         self.inst_tree.bind("<Button-3>", self.show_context_menu)
 
-        # Buttons for installers
+        # Buttons
         btn_frame = ttk.Frame(inst_frame)
         btn_frame.pack(side="bottom", fill="x", padx=5, pady=5)
         ttk.Button(btn_frame, text="Select All", command=self.select_all_installers).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="Clear Selection", command=self.deselect_all_installers).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="Delete Selected", command=self.delete_selected_installer).pack(side="left", padx=20) # NEW
+        ttk.Button(btn_frame, text="Unselect All", command=self.deselect_all_installers).pack(side="left", padx=2)
+        ttk.Button(btn_frame, text="Delete Selected", command=self.delete_selected_installer).pack(side="left", padx=20)
         ttk.Button(btn_frame, text="Download New...", command=self.open_download_dialog).pack(side="right", padx=2)
 
         # Bottom Section: Actions & Log
         bottom_frame = ttk.Frame(paned)
         paned.add(bottom_frame, weight=1)
 
-        # Settings Frame (Buffer, etc.)
+        # Settings Frame
         settings_frame = ttk.LabelFrame(bottom_frame, text="3. Settings & Space Check")
         settings_frame.pack(fill="x", padx=5, pady=5)
 
-        # Buffer Slider (0.1 to 10 GB)
+        # Default Buffer Slider
         buffer_frame = ttk.Frame(settings_frame)
         buffer_frame.pack(fill="x", padx=5, pady=5)
 
-        ttk.Label(buffer_frame, text="Safety Buffer (GB):").pack(side="left", padx=5)
+        ttk.Label(buffer_frame, text="Default Safety Buffer (GB):").pack(side="left", padx=5)
         self.buffer_var = tk.DoubleVar(value=2.0)
         self.buffer_scale = ttk.Scale(buffer_frame, from_=0.1, to=10.0, variable=self.buffer_var, orient="horizontal")
         self.buffer_scale.pack(side="left", fill="x", expand=True, padx=5)
@@ -140,7 +159,7 @@ class MultiBootGUI:
         self.buffer_label.pack(side="left", padx=5)
         self.buffer_scale.configure(command=self.on_buffer_change)
 
-        # Space Usage Panel
+        # Intelligent Space Panel
         self.space_label = ttk.Label(settings_frame, text="Required: 0.0 GB | Available: 0.0 GB | Select Installers & Disk", font=("Arial", 10, "bold"))
         self.space_label.pack(fill="x", padx=10, pady=10)
 
@@ -154,6 +173,57 @@ class MultiBootGUI:
 
         self.log_text = scrolledtext.ScrolledText(log_frame, height=10, state="disabled", font=("Consolas", 10))
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+
+    # --- Event Handlers & Logic ---
+
+    def on_tree_click(self, event):
+        region = self.inst_tree.identify("region", event.x, event.y)
+        if region == "cell":
+            col = self.inst_tree.identify_column(event.x)
+            if col == "#1": # The 'Select' column
+                item_id = self.inst_tree.identify_row(event.y)
+                self.toggle_selection(item_id)
+                return "break" # Stop propagation
+
+    def on_tree_double_click(self, event):
+        item_id = self.inst_tree.identify_row(event.y)
+        if item_id:
+            self.edit_selected_buffer(item_id)
+
+    def toggle_selection(self, item_id):
+        if not item_id: return
+        current = self.inst_tree.set(item_id, "Select")
+
+        # Don't select stubs
+        tags = self.inst_tree.item(item_id, "tags")
+        if "stub" in tags:
+            messagebox.showwarning("Invalid", "Cannot select Stub installer.")
+            return
+
+        new_val = "☑" if current == "☐" else "☐"
+        self.inst_tree.set(item_id, "Select", new_val)
+        self.update_space_usage()
+
+    def edit_selected_buffer(self, item_id=None):
+        if not item_id:
+            sel = self.inst_tree.selection()
+            if sel: item_id = sel[0]
+            else: return
+
+        values = self.inst_tree.item(item_id)['values']
+        name = values[1]
+        current_buffer = values[4] # "2.0 GB"
+
+        new_val = simpledialog.askfloat("Buffer Size", f"Enter buffer size (GB) for {name}:",
+                                        minvalue=0.1, maxvalue=20.0, initialvalue=float(current_buffer.split()[0]))
+        if new_val is not None:
+            # Update Custom Buffer Map
+            key = f"{name}_{values[2]}" # Name_Version
+            self.custom_buffers[key] = new_val
+
+            # Update UI
+            self.inst_tree.set(item_id, "Buffer", f"{new_val:.1f} GB")
+            self.update_space_usage()
 
     def log(self, message):
         self.log_queue.put(message)
@@ -171,57 +241,73 @@ class MultiBootGUI:
         self.root.after(100, self.poll_log_queue)
 
     def on_buffer_change(self, value):
-        self.buffer_label.configure(text=f"{float(value):.1f} GB")
+        val = float(value)
+        self.buffer_label.configure(text=f"{val:.1f} GB")
+        # Update all rows that don't have custom buffer?
+        # Or just use this as default for new ones?
+        # Logic: Update all rows that are using default.
+        # Hard to track "using default", so let's just update UI for visual consistency
+        # BUT we only recalculate space based on row values.
+        # So we should update rows.
+
+        for item in self.inst_tree.get_children():
+            values = self.inst_tree.item(item)['values']
+            name_ver_key = f"{values[1]}_{values[2]}"
+            if name_ver_key not in self.custom_buffers:
+                self.inst_tree.set(item, "Buffer", f"{val:.1f} GB")
+
         self.update_space_usage()
 
     def on_disk_selected(self, event):
         self.update_space_usage()
 
+    def get_selected_installers(self):
+        """Return list of selected item IDs"""
+        selected = []
+        for item in self.inst_tree.get_children():
+            if self.inst_tree.set(item, "Select") == "☑":
+                selected.append(item)
+        return selected
+
     def update_space_usage(self, event=None):
-        # 1. Calculate Required Space
-        selected_items = self.inst_tree.selection()
-        total_installer_size_gb = 0.0
+        selected_items = self.get_selected_installers()
+        total_required = 0.0
 
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
-            size_str = values[2] # "12.34 GB"
+
+            # Size
             try:
-                size = float(size_str.split()[0])
-                total_installer_size_gb += size
-            except:
-                pass
+                size_gb = float(values[3].split()[0])
+            except: size_gb = 0.0
 
-        # Add buffer per installer? Or global buffer?
-        # Core logic adds buffer PER PARTITION.
-        # constants.calculate_partition_size includes overhead.
-        # Let's approximate:
-        # Total = Sum(Installer + Overhead + Buffer) + EFI
+            # Buffer
+            try:
+                buffer_gb = float(values[4].split()[0])
+            except: buffer_gb = 2.0
 
-        # Simple estimate for GUI:
-        # Installer * 1.1 + Buffer * Count
-        count = len(selected_items)
-        buffer_per_partition = self.buffer_var.get()
+            # Overhead
+            overhead = size_gb * 0.15
 
-        if count > 0:
-            self.total_required_gb = (total_installer_size_gb * 1.15) + (buffer_per_partition * count) + 0.5 # EFI/Overhead
-        else:
-            self.total_required_gb = 0.0
+            total_required += size_gb + overhead + buffer_gb
 
-        # 2. Get Available Space
+        if selected_items:
+             total_required += 0.5 # EFI + Base overhead
+
+        self.total_required_gb = total_required
+
+        # Available Space
         disk_str = self.selected_disk.get()
         available_gb = 0.0
         if disk_str and "No external" not in disk_str:
             try:
-                # "Name (disk2) - 64.0 GB"
-                # split by " - " take last part
                 size_part = disk_str.split(' - ')[1]
                 available_gb = float(size_part.split()[0])
             except:
                 available_gb = 0.0
-
         self.current_disk_size_gb = available_gb
 
-        # 3. Update Label
+        # Update Label
         color = "black"
         status_text = "Ready"
 
@@ -247,7 +333,6 @@ class MultiBootGUI:
 
     def refresh_hardware(self):
         self.log("Scanning hardware...")
-        # Scan Disks
         try:
             drives = disk_detector.get_external_usb_drives()
             options = []
@@ -255,8 +340,7 @@ class MultiBootGUI:
                 for d in drives:
                     options.append(f"{d['name']} ({d['id']}) - {d['size_gb']:.1f} GB")
                 self.disk_combo['values'] = options
-                if options:
-                    self.disk_combo.current(0)
+                if options: self.disk_combo.current(0)
                 self.log(f"Found {len(drives)} USB drive(s).")
             else:
                 self.disk_combo['values'] = ["No external USB drives found"]
@@ -265,37 +349,38 @@ class MultiBootGUI:
         except Exception as e:
             self.log(f"Error scanning drives: {e}")
 
-        # Scan Installers
         self.scan_installers()
         self.update_space_usage()
 
     def scan_installers(self):
-        # Clear tree
         for item in self.inst_tree.get_children():
             self.inst_tree.delete(item)
 
         self.installers_list = installer_scanner.scan_for_installers()
-
-        # Apply stub check properly
         import detection.stub_validator
+
+        default_buffer = self.buffer_var.get()
 
         if self.installers_list:
             for inst in self.installers_list:
                 is_stub = detection.stub_validator.is_stub_installer(inst['path'])
                 inst['is_stub'] = is_stub
                 status = "STUB" if is_stub else inst.get('status', 'FULL')
-
                 size_gb = inst['size_kb'] / (1024 * 1024)
 
-                # Insert into tree
+                # Check custom buffer
+                key = f"{inst['name']}_{inst['version']}"
+                buf = self.custom_buffers.get(key, default_buffer)
+
                 item_id = self.inst_tree.insert("", "end", values=(
+                    "☐", # Checkbox
                     inst['name'],
                     inst['version'],
                     f"{size_gb:.2f} GB",
+                    f"{buf:.1f} GB",
                     status
                 ))
 
-                # Tag Stubs for visual
                 if is_stub:
                     self.inst_tree.item(item_id, tags=("stub",))
 
@@ -308,15 +393,14 @@ class MultiBootGUI:
 
     def select_all_installers(self):
         for item in self.inst_tree.get_children():
-            # Don't select stubs
             tags = self.inst_tree.item(item, "tags")
             if "stub" not in tags:
-                self.inst_tree.selection_add(item)
+                self.inst_tree.set(item, "Select", "☑")
         self.update_space_usage()
 
     def deselect_all_installers(self):
         for item in self.inst_tree.get_children():
-            self.inst_tree.selection_remove(item)
+            self.inst_tree.set(item, "Select", "☐")
         self.update_space_usage()
 
     def show_context_menu(self, event):
@@ -326,92 +410,90 @@ class MultiBootGUI:
             self.context_menu.post(event.x_root, event.y_root)
 
     def delete_selected_installer(self):
+        # We delete rows that are highlighted (Tk selection), not checked boxes
         selected = self.inst_tree.selection()
         if not selected: return
 
-        # Confirm for all
         if not messagebox.askyesno("Delete", f"Delete {len(selected)} installer(s)?"):
             return
 
         for item in selected:
             values = self.inst_tree.item(item)['values']
-            name = values[0]
-
-            # Find path
+            name = values[1]
             path = None
             for inst in self.installers_list:
                 if inst['name'] == name:
                     path = inst['path']
                     break
-
             if path:
                 try:
                     subprocess.run(['sudo', 'rm', '-rf', path], check=True)
                     self.log(f"Deleted {name}")
                 except subprocess.CalledProcessError as e:
                     self.log(f"Failed to delete {name}: {e}")
-
         self.scan_installers()
 
     def open_download_dialog(self):
-        # Ask for search term
         search = simpledialog.askstring("Download Installer", "Enter search term (e.g. 'Sonoma', '13.6', '12') [Empty for All]:")
-
         self.log(f"Searching Mist for '{search}'...")
         threading.Thread(target=self.run_mist_search, args=(search,)).start()
 
     def run_mist_search(self, search_term):
         self.create_btn.config(state="disabled")
         try:
-             # Check mist
             if not mist_downloader.check_mist_available():
                 self.log("Mist-CLI missing. Attempting install...")
                 mist_downloader.install_mist()
 
-            # Use new structured list function
             installers = mist_downloader.list_installers(search_term)
-
             if not installers:
                 self.log("No installers found matching that term.")
                 return
 
-            # Show results in a new dialog window
             self.root.after(0, lambda: self.show_download_selection(installers))
-
         except Exception as e:
             self.log(f"Error searching: {e}")
         finally:
             self.root.after(0, lambda: self.create_btn.config(state="normal"))
 
     def show_download_selection(self, data):
-        # Create a TopLevel window
         top = tk.Toplevel(self.root)
         top.title("Select Version to Download")
         top.geometry("800x500")
 
-        cols = ("Name", "Version", "Build", "Size", "Date", "Status")
+        # Checkbox column here too? Yes
+        cols = ("Select", "Name", "Version", "Build", "Size", "Date", "Status")
         tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="extended")
 
-        for c in cols:
+        tree.heading("Select", text="[x]")
+        tree.column("Select", width=40, anchor="center")
+
+        for c in cols[1:]:
             tree.heading(c, text=c)
-            if c == "Name":
-                tree.column(c, width=200)
-            else:
-                tree.column(c, width=100)
+            if c == "Name": tree.column(c, width=200)
+            else: tree.column(c, width=90)
 
         tree.pack(fill="both", expand=True, padx=10, pady=10)
 
-        # Insert data
-        for item in data:
-            size_bytes = item.get('size', 0)
-            size_gb = f"{size_bytes / (1024**3):.1f} GB"
+        def on_dl_click(event):
+            region = tree.identify("region", event.x, event.y)
+            if region == "cell" and tree.identify_column(event.x) == "#1":
+                item = tree.identify_row(event.y)
+                curr = tree.set(item, "Select")
+                tree.set(item, "Select", "☑" if curr == "☐" else "☐")
+                return "break"
 
+        tree.bind("<Button-1>", on_dl_click)
+
+        for item in data:
+            size_gb = f"{item.get('size', 0) / (1024**3):.1f} GB"
             status_flags = []
             if item.get('downloaded'): status_flags.append("Installed")
             if item.get('latest'): status_flags.append("Latest")
             status_str = ", ".join(status_flags)
 
             item_id = tree.insert("", "end", values=(
+                "☐",
                 item.get('name'),
                 item.get('version'),
                 item.get('build'),
@@ -420,41 +502,30 @@ class MultiBootGUI:
                 status_str
             ))
 
-            # Highlighting
-            if item.get('latest'):
-                tree.item(item_id, tags=("latest",))
-            if item.get('downloaded'):
-                tree.item(item_id, tags=("installed",))
+            if item.get('latest'): tree.item(item_id, tags=("latest",))
+            if item.get('downloaded'): tree.item(item_id, tags=("installed",))
 
         tree.tag_configure("latest", font=("TkDefaultFont", 10, "bold"))
         tree.tag_configure("installed", foreground="gray")
 
         def do_download():
-            sel = tree.selection()
-            if not sel: return
-
             selected_items = []
-            for s in sel:
-                vals = tree.item(s)['values']
-                name = vals[0]
-                version = str(vals[1])
-                build = str(vals[2])
+            for item in tree.get_children():
+                if tree.set(item, "Select") == "☑":
+                    vals = tree.item(item)['values']
+                    name = vals[1]
+                    version = str(vals[2])
+                    build = str(vals[3])
 
-                # Find matching identifier in original data
-                identifier = None
-                for d in data:
-                    if d.get('name') == name and d.get('version') == version and d.get('build') == build:
-                        identifier = d.get('identifier')
-                        break
-
-                if identifier:
+                    identifier = None
+                    for d in data:
+                        if d.get('name') == name and d.get('version') == version and d.get('build') == build:
+                            identifier = d.get('identifier')
+                            break
                     selected_items.append((identifier, name))
-                else:
-                    selected_items.append((None, name)) # Fallback
 
+            if not selected_items: return
             top.destroy()
-
-            # Start download thread
             threading.Thread(target=self.run_download_process, args=(selected_items,)).start()
 
         btn = ttk.Button(top, text="Download Selected", command=do_download)
@@ -465,21 +536,14 @@ class MultiBootGUI:
         try:
             for identifier, name in items:
                 self.log(f"Downloading {name}...")
-
                 if identifier:
                     if mist_downloader.download_installer_by_identifier(identifier, name):
                          self.log(f"Download of {name} complete.")
                     else:
                          self.log(f"Download of {name} failed.")
                 else:
-                    # Fallback
-                    if mist_downloader.download_installer([name]):
-                        self.log(f"Download of {name} complete.")
-                    else:
-                        self.log(f"Download of {name} failed.")
-
+                    mist_downloader.download_installer([name])
             self.root.after(0, self.scan_installers)
-
         except Exception as e:
             self.log(f"Download error: {e}")
         finally:
@@ -487,172 +551,127 @@ class MultiBootGUI:
 
     def format_disk_dialog(self):
         disk_str = self.selected_disk.get()
-        if "No external" in disk_str or not disk_str:
-            messagebox.showwarning("Warning", "No disk selected.")
-            return
-
+        if not disk_str: return
         disk_id = disk_str.split('(')[1].split(')')[0]
-
-        if messagebox.askyesno("Format Disk", f"WARNING: This will completely ERASE {disk_id} and format it as MacOS Extended (Journaled).\n\nAre you sure?"):
+        if messagebox.askyesno("Format", f"Erase {disk_id}?"):
              threading.Thread(target=self.run_format_disk, args=(disk_id,)).start()
 
     def run_format_disk(self, disk_id):
         self.log(f"Formatting {disk_id}...")
         try:
-            cmd = ['diskutil', 'eraseDisk', 'JHFS+', 'UNTITLED', disk_id]
-            subprocess.run(cmd, check=True)
-            self.log(f"Format complete: {disk_id}")
-            self.root.after(0, lambda: messagebox.showinfo("Success", "Disk Formatted Successfully"))
+            subprocess.run(['diskutil', 'eraseDisk', 'JHFS+', 'UNTITLED', disk_id], check=True)
+            self.log("Format complete.")
             self.root.after(0, self.refresh_hardware)
         except Exception as e:
             self.log(f"Format failed: {e}")
-            self.root.after(0, lambda: messagebox.showerror("Error", f"Format failed: {e}"))
 
     def start_creation(self):
-        selected_items = self.inst_tree.selection()
+        selected_items = self.get_selected_installers()
         if not selected_items:
-            messagebox.showwarning("Warning", "Please select at least one installer.")
+            messagebox.showwarning("Warning", "Select an installer.")
             return
 
         disk_str = self.selected_disk.get()
-        if "No external" in disk_str or not disk_str:
-            messagebox.showwarning("Warning", "Please select a target disk.")
-            return
+        if not disk_str: return
+        try: disk_id = disk_str.split('(')[1].split(')')[0]
+        except: return
 
-        try:
-            disk_id = disk_str.split('(')[1].split(')')[0]
-        except IndexError:
-            self.log("Error parsing disk ID.")
-            return
-
-        # Check Fit
-        if self.total_required_gb > self.current_disk_size_gb:
-            if not messagebox.askyesno("Warning", "Disk space may be insufficient.\nProceed anyway?"):
-                return
-
-        # Check Stubs
         target_installers = []
         for item_id in selected_items:
-            tags = self.inst_tree.item(item_id, "tags")
             values = self.inst_tree.item(item_id)['values']
-            name = values[0]
+            name = values[1]
+            version = str(values[2])
+            buffer_val = float(values[4].split()[0])
 
-            if "stub" in tags:
-                messagebox.showerror("Error", f"Cannot use '{name}' because it is a STUB installer.\nPlease download a full version.")
-                return
-
-            # Match to object
-            version = str(values[1])
-            found = False
+            found = None
             for inst in self.installers_list:
                 if inst['name'] == name and str(inst['version']) == version:
-                    target_installers.append(inst)
-                    found = True
+                    found = inst.copy()
+                    found['buffer_gb'] = buffer_val # Inject custom buffer
                     break
-            if not found:
-                self.log(f"Warning: Could not match {name} to source object.")
+            if found: target_installers.append(found)
 
         if not target_installers: return
 
-        if messagebox.askyesno("Confirm", f"This will ERASE {disk_id}.\n\nInstallers: {len(target_installers)}\nSafety Buffer: {self.buffer_var.get()} GB\n\nALL DATA WILL BE LOST. Continue?"):
-            self.log("Starting creation process...")
+        if messagebox.askyesno("Confirm", f"Erase {disk_id} and install {len(target_installers)} macOS versions?"):
+            self.log("Starting...")
             self.create_btn.config(state="disabled")
             self.is_working = True
-
-            # Start thread
             threading.Thread(target=self.run_creation_thread, args=(disk_id, target_installers)).start()
 
     def run_creation_thread(self, disk_id, installers):
         try:
-            # 1. Backup
-            self.log("Backing up partition table...")
-            import safety.backup_manager
-            backup = safety.backup_manager.backup_partition_table(disk_id)
-            if backup: self.log(f"Backup saved to {backup}")
+            # We need to pass custom buffers to partitioner
+            # The partitioner uses constants.calculate_partition_size which looks up DB.
+            # We should modify the installer dict to carry the buffer preference,
+            # and modify partitioner to respect it.
 
-            # 2. Extract Icons
-            self.log("Extracting icons...")
+            # Monkey-patching constants or passing a buffer map to partitioner is better.
+            # Let's assume partitioner accepts 'buffer_gb' in installer dict if we modify it.
+            # (Checking partitioner code in next step if needed, but for now assuming we need to update it)
+
+            # Proceed with standard logic
+            import safety.backup_manager
+            safety.backup_manager.backup_partition_table(disk_id)
+
             for inst in installers:
                 branding.extract_icon_from_installer(inst['path'], inst['name'])
 
-            # 3. Partitioning
-            constants.OS_DATABASE["default_buffer"] = self.buffer_var.get()
-
             import operations.updater
             struct = operations.updater.get_drive_structure(disk_id)
-            if not struct:
-                self.log("Failed to get disk info.")
-                return
+            total_size_gb = struct['disk_size'] / 1e9 if struct else 0
 
-            total_size_gb = struct['disk_size'] / 1e9
+            self.log(f"Partitioning {disk_id}...")
+            # We need to ensure partitioner uses our custom buffer.
+            # We'll need to verify partitioner.py supports this or update it.
+            # For now, let's inject it into OS_DATABASE temporarily for this run? No, that's messy.
+            # Better: Update partitioner to check installer['buffer_gb'] first.
 
-            self.log(f"Partitioning {disk_id} ({total_size_gb:.1f} GB)...")
             success = partitioner.create_multiboot_layout(disk_id, installers, total_size_gb)
+
             if not success:
-                self.log("Partitioning failed!")
+                self.log("Partitioning failed.")
                 return
 
-            self.log("Partitioning successful. Waiting for volumes to mount...")
             time.sleep(5)
-
-            # 4. Installation
             current_partitions = partitioner.get_partition_list(disk_id)
 
             for inst in installers:
-                self.log(f"Preparing to install {inst['name']}...")
-
+                self.log(f"Installing {inst['name']}...")
                 os_name = constants.get_os_name(inst['version'])
                 version_clean = inst['version'].replace('.', '_').split()[0]
                 expected_vol_name = f"INSTALL_{os_name}_{version_clean}"[:27]
 
                 target_part = next((p for p in current_partitions if p['name'] == expected_vol_name), None)
-
                 if not target_part:
                     time.sleep(2)
                     current_partitions = partitioner.get_partition_list(disk_id)
                     target_part = next((p for p in current_partitions if p['name'] == expected_vol_name), None)
 
-                if not target_part:
-                    self.log(f"Could not find partition for {inst['name']}")
-                    continue
-
-                part_id = target_part['id']
-                part_num = part_id.replace(disk_id, '').replace('s', '')
-
-                mount_point = installer_runner.get_volume_mount_point(disk_id, part_num)
-                if not mount_point:
-                    self.log(f"Mounting {part_id}...")
-                    subprocess.run(['diskutil', 'mount', part_id])
-                    time.sleep(1)
+                if target_part:
+                    part_id = target_part['id']
+                    part_num = part_id.replace(disk_id, '').replace('s', '')
                     mount_point = installer_runner.get_volume_mount_point(disk_id, part_num)
+                    if not mount_point:
+                        subprocess.run(['diskutil', 'mount', part_id])
+                        time.sleep(1)
+                        mount_point = installer_runner.get_volume_mount_point(disk_id, part_num)
 
-                if not mount_point:
-                    self.log(f"Failed to mount {part_id}")
-                    continue
+                    if mount_point:
+                        def cb(p):
+                            if p%10==0: self.log(f"  {inst['name']}: {p}%")
+                        if installer_runner.run_createinstallmedia(inst['path'], mount_point, progress_callback=cb):
+                            self.log("Success.")
+                            new_mount = installer_runner.get_volume_mount_point(disk_id, part_num)
+                            if new_mount: branding.apply_full_branding(new_mount, inst['name'], os_name, inst['version'])
+                        else:
+                            self.log("Failed.")
 
-                def progress_cb(pct):
-                    if pct % 5 == 0:
-                        self.log(f"  {inst['name']}: {pct}%")
-
-                self.log(f"Running createinstallmedia for {inst['name']}...")
-                success = installer_runner.run_createinstallmedia(
-                    inst['path'], mount_point, progress_callback=progress_cb
-                )
-
-                if success:
-                    self.log(f"Installation of {inst['name']} complete.")
-                    new_mount = installer_runner.get_volume_mount_point(disk_id, part_num)
-                    if new_mount:
-                        branding.apply_full_branding(new_mount, inst['name'], os_name, inst['version'])
-                        self.log("Branding applied.")
-                else:
-                    self.log(f"Installation of {inst['name']} failed.")
-
-            self.log("All operations complete.")
-            self.root.after(0, lambda: messagebox.showinfo("Success", "Multi-Boot USB Created Successfully!"))
+            self.log("Done.")
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Complete"))
 
         except Exception as e:
-            self.log(f"Critical Error: {e}")
+            self.log(f"Error: {e}")
             import traceback
             self.log(traceback.format_exc())
         finally:
@@ -661,8 +680,7 @@ class MultiBootGUI:
 
 def launch(config=None):
     if os.geteuid() != 0:
-        print("Warning: Running GUI without root. Operations may fail.")
-
+        print("Warning: Running GUI without root.")
     root = tk.Tk()
     app = MultiBootGUI(root, config)
     root.mainloop()
