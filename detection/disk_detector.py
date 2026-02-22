@@ -15,6 +15,7 @@ def get_external_usb_drives():
     """
     try:
         # Get external physical disks
+        # This already filters many internal ones.
         output = subprocess.check_output([
             "diskutil", "list", "external", "physical", "-plist"
         ])
@@ -87,24 +88,39 @@ def _get_disk_info(disk_id):
         return None
 
 def _is_valid_usb(disk_info):
-    """Validate disk is truly external and removable."""
-    # Must be removable
-    if not disk_info.get('Removable', False):
-        return False
+    """Validate disk is truly external and likely removable."""
 
-    # Must not be internal
+    # Must NOT be internal
     if disk_info.get('Internal', True):
         return False
 
-    # Must not be virtual
+    # Must NOT be virtual
     if disk_info.get('Virtual', False):
         return False
 
-    # Must be USB/Thunderbolt protocol
+    # Removable check:
+    # Some external SSDs report Removable: No.
+    # But since we already filtered by 'external' in diskutil list,
+    # and checked internal=False here, we can relax Removable=True.
+    # However, strict safety might want Removable=True.
+    # Given the user complaint "usb driver not detecting", likely Removable=False for their stick.
+
+    is_removable = disk_info.get('Removable', False)
+
+    # Protocol check
     protocol = disk_info.get('BusProtocol', '').lower()
-    valid_protocols = ['usb', 'thunderbolt']
+    valid_protocols = ['usb', 'thunderbolt', 'firewire', 'sd', 'mmc']
 
-    if not any(p in protocol for p in valid_protocols):
-        return False
+    is_valid_protocol = any(p in protocol for p in valid_protocols)
 
-    return True
+    if is_valid_protocol:
+        return True # Trust protocol + internal=False check
+
+    if is_removable:
+        return True # Trust removable flag
+
+    # If neither (e.g. external SATA/SAS drive marked non-removable), skip it for safety?
+    # Or rely on user discretion?
+    # Let's be moderately strict: Either valid protocol OR removable.
+
+    return False
