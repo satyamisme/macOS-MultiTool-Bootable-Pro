@@ -20,22 +20,20 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
     """
     # Build partition list
     partitions = []
-    used_gb = 0
+    used_mb = 0
 
     # 1. EFI partition (1GB)
     # Using JHFS+ for compatibility, though actual ESP is usually FAT32.
-    # diskutil GPT usually creates a hidden ESP at s1.
-    # If we specify EFI_SYSTEM as the first user partition, it becomes s2.
-    # The user asked for an explicit EFI/Boot partition structure.
     partitions.extend(["JHFS+", "EFI_SYSTEM", "1G"])
-    used_gb += 1
+    used_mb += 1024
 
     # 2. macOS installer partitions
     for installer in installers:
         # Check for custom buffer injected by GUI
         custom_buffer = installer.get('buffer_gb')
 
-        size_gb = constants.calculate_partition_size(
+        # Calculate size in MB
+        size_mb = constants.calculate_partition_size(
             installer['size_kb'],
             installer['version'],
             override_buffer_gb=custom_buffer
@@ -46,12 +44,15 @@ def create_multiboot_layout(disk_id, installers, total_disk_gb):
         version_clean = installer['version'].replace('.', '_').split()[0]
         part_name = f"INSTALL_{os_name}_{version_clean}"[:27]  # Limit length
 
-        partitions.extend(["JHFS+", part_name, f"{size_gb}G"])
-        used_gb += size_gb
+        partitions.extend(["JHFS+", part_name, f"{size_mb}M"])
+        used_mb += size_mb
 
     # 3. Data partition (remaining space)
-    remaining_gb = total_disk_gb - used_gb
-    if remaining_gb > 2:
+    # Convert total_disk_gb to MB for check
+    total_disk_mb = total_disk_gb * 1024
+    remaining_mb = total_disk_mb - used_mb
+
+    if remaining_mb > 2048: # > 2GB
         partitions.extend(["ExFAT", "DATA_STORE", "R"])  # R = remaining
 
     # Build command
