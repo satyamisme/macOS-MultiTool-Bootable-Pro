@@ -6,25 +6,52 @@ ONE RESPONSIBILITY: Find safe USB targets
 import subprocess
 import plistlib
 
-def get_external_usb_drives():
+def get_external_usb_drives(show_all=False):
     """
     Get list of external, removable USB drives.
+
+    Args:
+        show_all: If True, show all non-boot physical disks (including Internal).
 
     Returns:
         list: USB drive metadata dicts
     """
     try:
-        # Get external physical disks
-        # This already filters many internal ones.
-        output = subprocess.check_output([
-            "diskutil", "list", "external", "physical", "-plist"
-        ])
+        # Determine list scope
+        # Fallback mechanism for diskutil listing
+        cmds_to_try = []
+
+        if show_all:
+            # Most permissive: All physical disks
+            cmds_to_try.append(["diskutil", "list", "physical", "-plist"])
+        else:
+            # Standard: External physical
+            cmds_to_try.append(["diskutil", "list", "external", "physical", "-plist"])
+            # Fallback 1: Just External (if 'physical' arg fails on old macOS)
+            cmds_to_try.append(["diskutil", "list", "external", "-plist"])
+
+        output = None
+        for cmd in cmds_to_try:
+            try:
+                output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL)
+                break
+            except subprocess.CalledProcessError:
+                continue
+
+        if output is None:
+            # Last resort: List EVERYTHING and filter in Python
+            try:
+                output = subprocess.check_output(["diskutil", "list", "-plist"])
+            except:
+                print("Critical: diskutil failed completely.")
+                return []
+
         disk_data = plistlib.loads(output)
     except Exception as e:
         print(f"Error listing disks: {e}")
         return []
 
-    # Get boot disk to exclude it
+    # Get boot disk to exclude it (CRITICAL SAFETY)
     boot_disk_id = _get_boot_disk_id()
 
     usb_drives = []
@@ -32,7 +59,7 @@ def get_external_usb_drives():
     for disk_entry in disk_data.get('AllDisksAndPartitions', []):
         disk_id = disk_entry['DeviceIdentifier']
 
-        # Safety checks
+        # Safety checks - NEVER SKIP THIS
         if _is_unsafe_disk(disk_id, boot_disk_id):
             continue
 
@@ -41,16 +68,22 @@ def get_external_usb_drives():
         if not disk_info:
             continue
 
-        # Validate it's truly external and removable
-        if not _is_valid_usb(disk_info):
-            continue
+        # Validate criteria
+        if not show_all:
+            if not _is_valid_usb(disk_info):
+                continue
+        else:
+            # Even in show_all, exclude Virtual disks (DMGs) if they snuck in
+            if disk_info.get('Virtual', False):
+                continue
 
         usb_drives.append({
             'id': disk_id,
             'name': disk_info.get('MediaName', 'Unknown'),
             'size_gb': disk_info.get('TotalSize', 0) / 1e9,
             'protocol': disk_info.get('BusProtocol', 'Unknown'),
-            'removable': disk_info.get('Removable', False)
+            'removable': disk_info.get('Removable', False),
+            'internal': disk_info.get('Internal', False)
         })
 
     return usb_drives
@@ -66,8 +99,8 @@ def _get_boot_disk_id():
 
 def _is_unsafe_disk(disk_id, boot_disk_id):
     """Check if disk is unsafe to modify."""
-    # Never touch disk0 or disk1
-    # Use exact string matching
+    # Never touch disk0 or disk1 (System/Recovery usually)
+    # This is a hardcoded safety net.
     if disk_id == 'disk0' or disk_id == 'disk1':
         return True
 
@@ -91,7 +124,9 @@ def _is_valid_usb(disk_info):
     """Validate disk is truly external and likely removable."""
 
     # Check internal flag
-    is_internal = disk_info.get('Internal', True)
+    # If Internal is True, we generally skip unless show_all override was passed (handled in caller)
+    if disk_info.get('Internal', True):
+        pass
 
     # Protocol check
     protocol = disk_info.get('BusProtocol', '').lower()
@@ -104,11 +139,6 @@ def _is_valid_usb(disk_info):
     # RELAXED RULES:
 
     # 1. If protocol is explicitly USB/SD/MMC, trust it even if marked Internal
-    # (some USB adapters report as internal SATA/NVMe bridges but are external enclosures)
-    # BUT we must be very careful about accidentally wiping real internal drives.
-    # The `diskutil list external` command is the first filter. If diskutil thinks it's external,
-    # we should trust that over the `Internal` flag from `diskutil info` IF protocol matches.
-
     if is_valid_protocol:
         return True
 
@@ -116,16 +146,14 @@ def _is_valid_usb(disk_info):
     if is_removable:
         return True
 
-    # 3. If diskutil list external returned it, but protocol is weird (e.g. SATA via USB bridge)
-    # and removable is false... it's risky. But user says "usb driver not detecting".
-    # Often these appear as "External Physical Store".
-    # Since we are iterating strictly over `diskutil list external`, we can be more lenient.
-    # We already filter out boot disk and disk0/disk1.
-
-    # So if it's in the external list, and not unsafe... accept it?
-    # Let's add a check for "Virtual" to exclude DMGs.
+    # 3. If we are listing "external" disks (default cmd), and it's not Virtual...
     if disk_info.get('Virtual', False):
         return False
 
-    # If we got here, diskutil says it's external.
+    # If we are here, and Internal=True, and Protocol=SATA... it's probably a real internal drive.
+    # We should return False here. The user must enable "Show All" to see it.
+
+    if disk_info.get('Internal', True):
+        return False
+
     return True
