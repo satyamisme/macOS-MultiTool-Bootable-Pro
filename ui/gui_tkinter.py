@@ -4,18 +4,19 @@ ONE RESPONSIBILITY: Provide a graphical interface for the tool
 """
 
 import tkinter as tk
-from tkinter import ttk, messagebox, scrolledtext
+from tkinter import ttk, messagebox, scrolledtext, simpledialog
 import threading
 import sys
 import os
 import queue
 import subprocess
 import time
+import json
 
 # Import core modules
 from detection import installer_scanner, disk_detector
 from core import privilege, constants
-from operations import partitioner, installer_runner, branding
+from operations import partitioner, installer_runner, branding, updater
 from integration import mist_downloader
 
 class MultiBootGUI:
@@ -23,13 +24,13 @@ class MultiBootGUI:
         self.root = root
         self.config = config
         self.root.title("macOS Multi-Tool Pro")
-        self.root.geometry("800x600")
+        self.root.geometry("900x700")
 
         # Variables
         self.selected_disk = tk.StringVar()
         self.installers_list = []
-        self.selected_installers = []
         self.log_queue = queue.Queue()
+        self.is_working = False
 
         # Layout
         self.create_widgets()
@@ -41,11 +42,26 @@ class MultiBootGUI:
         self.refresh_hardware()
 
     def create_widgets(self):
+        # Menu Bar
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Refresh All", command=self.refresh_hardware)
+        file_menu.add_separator()
+        file_menu.add_command(label="Exit", command=self.root.quit)
+
+        tools_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Tools", menu=tools_menu)
+        tools_menu.add_command(label="Format Disk (Erase All)", command=self.format_disk_dialog)
+        tools_menu.add_command(label="Download macOS Installers...", command=self.open_download_dialog)
+
         # Header
         header_frame = ttk.Frame(self.root)
         header_frame.pack(fill="x", padx=10, pady=5)
         ttk.Label(header_frame, text="macOS Multi-Boot Creator", font=("Arial", 18, "bold")).pack(side="left")
-        ttk.Button(header_frame, text="Refresh All", command=self.refresh_hardware).pack(side="right")
+        ttk.Button(header_frame, text="Refresh", command=self.refresh_hardware).pack(side="right")
 
         # Main PanedWindow
         paned = ttk.PanedWindow(self.root, orient="vertical")
@@ -59,7 +75,7 @@ class MultiBootGUI:
         disk_frame = ttk.LabelFrame(top_frame, text="1. Select Target USB Drive")
         disk_frame.pack(fill="x", padx=5, pady=5)
 
-        self.disk_combo = ttk.Combobox(disk_frame, textvariable=self.selected_disk, state="readonly", width=50)
+        self.disk_combo = ttk.Combobox(disk_frame, textvariable=self.selected_disk, state="readonly", width=60)
         self.disk_combo.pack(fill="x", padx=10, pady=10)
 
         # Middle: Installer Selection
@@ -68,17 +84,24 @@ class MultiBootGUI:
 
         # Treeview for installers
         cols = ("Name", "Version", "Size", "Status")
-        self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=8)
+        self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=10)
         for col in cols:
             self.inst_tree.heading(col, text=col)
-            self.inst_tree.column(col, width=100)
         self.inst_tree.column("Name", width=250)
+        self.inst_tree.column("Version", width=100)
+        self.inst_tree.column("Size", width=100)
+        self.inst_tree.column("Status", width=100)
         self.inst_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
         # Scrollbar for tree
         scrollbar = ttk.Scrollbar(inst_frame, orient="vertical", command=self.inst_tree.yview)
         scrollbar.pack(side="right", fill="y")
         self.inst_tree.configure(yscrollcommand=scrollbar.set)
+
+        # Context Menu for Installers
+        self.context_menu = tk.Menu(self.inst_tree, tearoff=0)
+        self.context_menu.add_command(label="Delete Installer", command=self.delete_selected_installer)
+        self.inst_tree.bind("<Button-3>", self.show_context_menu)
 
         # Buttons for installers
         btn_frame = ttk.Frame(inst_frame)
@@ -91,6 +114,19 @@ class MultiBootGUI:
         bottom_frame = ttk.Frame(paned)
         paned.add(bottom_frame, weight=1)
 
+        # Settings Frame (Buffer, etc.)
+        settings_frame = ttk.LabelFrame(bottom_frame, text="3. Settings")
+        settings_frame.pack(fill="x", padx=5, pady=5)
+
+        # Buffer Slider (Not hooked up to backend logic yet, but visual request)
+        ttk.Label(settings_frame, text="Safety Buffer (GB):").pack(side="left", padx=5)
+        self.buffer_var = tk.DoubleVar(value=2.0)
+        self.buffer_scale = ttk.Scale(settings_frame, from_=0.5, to=10.0, variable=self.buffer_var, orient="horizontal")
+        self.buffer_scale.pack(side="left", fill="x", expand=True, padx=5)
+        self.buffer_label = ttk.Label(settings_frame, text="2.0 GB")
+        self.buffer_label.pack(side="left", padx=5)
+        self.buffer_scale.configure(command=lambda v: self.buffer_label.configure(text=f"{float(v):.1f} GB"))
+
         # Action Button
         self.create_btn = ttk.Button(bottom_frame, text="CREATE BOOTABLE USB", command=self.start_creation)
         self.create_btn.pack(fill="x", padx=20, pady=10)
@@ -99,7 +135,7 @@ class MultiBootGUI:
         log_frame = ttk.LabelFrame(bottom_frame, text="Progress Log")
         log_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, state="disabled", font=("Consolas", 10))
+        self.log_text = scrolledtext.ScrolledText(log_frame, height=12, state="disabled", font=("Consolas", 10))
         self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
 
     def log(self, message):
@@ -120,18 +156,22 @@ class MultiBootGUI:
     def refresh_hardware(self):
         self.log("Scanning hardware...")
         # Scan Disks
-        drives = disk_detector.get_external_usb_drives()
-        options = []
-        if drives:
-            for d in drives:
-                options.append(f"{d['name']} ({d['id']}) - {d['size_gb']:.1f} GB")
-            self.disk_combo['values'] = options
-            self.disk_combo.current(0)
-            self.log(f"Found {len(drives)} USB drive(s).")
-        else:
-            self.disk_combo['values'] = ["No external USB drives found"]
-            self.disk_combo.current(0)
-            self.log("No USB drives found.")
+        try:
+            drives = disk_detector.get_external_usb_drives()
+            options = []
+            if drives:
+                for d in drives:
+                    options.append(f"{d['name']} ({d['id']}) - {d['size_gb']:.1f} GB")
+                self.disk_combo['values'] = options
+                if options:
+                    self.disk_combo.current(0)
+                self.log(f"Found {len(drives)} USB drive(s).")
+            else:
+                self.disk_combo['values'] = ["No external USB drives found"]
+                self.disk_combo.set("No external USB drives found")
+                self.log("No USB drives found.")
+        except Exception as e:
+            self.log(f"Error scanning drives: {e}")
 
         # Scan Installers
         self.scan_installers()
@@ -143,59 +183,224 @@ class MultiBootGUI:
 
         self.installers_list = installer_scanner.scan_for_installers()
 
+        # Apply stub check properly
+        import detection.stub_validator
+
         if self.installers_list:
             for inst in self.installers_list:
-                size_gb = inst['size_kb'] / (1024 * 1024)
-                status = inst.get('status', 'FULL')
+                is_stub = detection.stub_validator.is_stub_installer(inst['path'])
+                inst['is_stub'] = is_stub
+                status = "STUB" if is_stub else inst.get('status', 'FULL')
 
-                # Highlight partials? We can use tags but for now just text
-                self.inst_tree.insert("", "end", values=(
+                size_gb = inst['size_kb'] / (1024 * 1024)
+
+                # Insert into tree
+                item_id = self.inst_tree.insert("", "end", values=(
                     inst['name'],
                     inst['version'],
                     f"{size_gb:.2f} GB",
                     status
                 ))
+
+                # Tag Stubs for visual
+                if is_stub:
+                    self.inst_tree.item(item_id, tags=("stub",))
+
+            self.inst_tree.tag_configure("stub", foreground="gray")
             self.log(f"Found {len(self.installers_list)} local installer(s).")
         else:
             self.log("No local installers found.")
 
     def select_all_installers(self):
         for item in self.inst_tree.get_children():
-            self.inst_tree.selection_add(item)
+            # Don't select stubs
+            tags = self.inst_tree.item(item, "tags")
+            if "stub" not in tags:
+                self.inst_tree.selection_add(item)
 
     def deselect_all_installers(self):
         for item in self.inst_tree.get_children():
             self.inst_tree.selection_remove(item)
 
-    def open_download_dialog(self):
-        # Allow multi-download via comma separation
-        import tkinter.simpledialog
-        search = tkinter.simpledialog.askstring("Download Installer", "Enter macOS Names/Versions (comma-separated):")
-        if search:
-            targets = [t.strip() for t in search.split(',') if t.strip()]
-            self.log(f"Queuing download for: {', '.join(targets)}")
-            threading.Thread(target=self.run_download_thread, args=(targets,)).start()
+    def show_context_menu(self, event):
+        item = self.inst_tree.identify_row(event.y)
+        if item:
+            self.inst_tree.selection_set(item)
+            self.context_menu.post(event.x_root, event.y_root)
 
-    def run_download_thread(self, targets):
+    def delete_selected_installer(self):
+        selected = self.inst_tree.selection()
+        if not selected: return
+
+        item = selected[0]
+        values = self.inst_tree.item(item)['values']
+        name = values[0]
+
+        # Find path
+        path = None
+        for inst in self.installers_list:
+            if inst['name'] == name:
+                path = inst['path']
+                break
+
+        if path and messagebox.askyesno("Delete Installer", f"Are you sure you want to delete:\n{path}\n\nThis cannot be undone."):
+            try:
+                subprocess.run(['sudo', 'rm', '-rf', path], check=True)
+                self.log(f"Deleted {name}")
+                self.scan_installers()
+            except subprocess.CalledProcessError as e:
+                messagebox.showerror("Error", f"Failed to delete: {e}")
+
+    def open_download_dialog(self):
+        # Ask for search term
+        search = simpledialog.askstring("Download Installer", "Enter macOS Name or Version (e.g. 'Sonoma', '13.6'):")
+        if not search: return
+
+        self.log(f"Searching Mist for '{search}'...")
+        threading.Thread(target=self.run_mist_search, args=(search,)).start()
+
+    def run_mist_search(self, search_term):
         self.create_btn.config(state="disabled")
         try:
-            # Check mist
+             # Check mist
             if not mist_downloader.check_mist_available():
                 self.log("Mist-CLI missing. Attempting install...")
                 mist_downloader.install_mist()
 
-            # Download
-            self.log(f"Running mist download for: {targets}...")
+            # List available
+            # mist list installer <search> --output-type json
+            cmd = ['mist', 'list', 'installer', search_term, '--output-type', 'json', '--quiet']
+            result = subprocess.run(cmd, capture_output=True, text=True)
 
-            if mist_downloader.download_installer(targets):
-                self.log("Download complete!")
-                self.root.after(0, self.scan_installers)
-            else:
-                self.log("Download failed. Check logs.")
+            if result.returncode != 0:
+                self.log(f"Mist search failed: {result.stderr}")
+                return
+
+            try:
+                data = json.loads(result.stdout)
+            except:
+                self.log("Failed to parse Mist output.")
+                return
+
+            if not data:
+                self.log("No installers found matching that term.")
+                return
+
+            # Show results in a new dialog window
+            self.root.after(0, lambda: self.show_download_selection(data))
+
         except Exception as e:
-            self.log(f"Error during download: {e}")
+            self.log(f"Error searching: {e}")
         finally:
             self.root.after(0, lambda: self.create_btn.config(state="normal"))
+
+    def show_download_selection(self, data):
+        # Create a TopLevel window
+        top = tk.Toplevel(self.root)
+        top.title("Select Version to Download")
+        top.geometry("600x400")
+
+        cols = ("Name", "Version", "Build", "Size", "Date")
+        tree = ttk.Treeview(top, columns=cols, show="headings")
+        for c in cols:
+            tree.heading(c, text=c)
+            tree.column(c, width=100)
+        tree.pack(fill="both", expand=True, padx=10, pady=10)
+
+        for item in data:
+            # Mist JSON keys: name, version, build, size, date
+            # Size is bytes, convert to GB
+            size_bytes = item.get('size', 0)
+            size_gb = size_bytes / (1024**3)
+
+            tree.insert("", "end", values=(
+                item.get('name'),
+                item.get('version'),
+                item.get('build'),
+                f"{size_gb:.2f} GB",
+                item.get('date')
+            ))
+
+        def do_download():
+            sel = tree.selection()
+            if not sel: return
+
+            selected_items = []
+            for s in sel:
+                # We need a way to identify it for download. Mist uses name or version.
+                # Ideally we pass name + version to be specific.
+                vals = tree.item(s)['values']
+                name = vals[0]
+                version = vals[1]
+                selected_items.append((name, version))
+
+            top.destroy()
+
+            # Start download thread
+            threading.Thread(target=self.run_download_process, args=(selected_items,)).start()
+
+        btn = ttk.Button(top, text="Download Selected", command=do_download)
+        btn.pack(pady=10)
+
+    def run_download_process(self, items):
+        self.create_btn.config(state="disabled")
+        try:
+            for name, version in items:
+                self.log(f"Downloading {name} {version}...")
+                # Call mist with version specific flag?
+                # mist_downloader.download_installer usually takes just name list.
+                # We can modify it or just pass name if it picks latest.
+                # Ideally: mist download installer "Name" --version "Version" application
+
+                # Check mist_downloader implementation. It takes os_names list.
+                # Let's call subprocess directly here for precision or update mist_downloader.
+                # Updating mist_downloader to support explicit version is better, but let's do direct call here for GUI precision.
+
+                cmd = ['mist', 'download', 'installer', name, 'application', '--force', '--version', str(version)]
+
+                # We want to capture output for progress?
+                # For now just blocking run.
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+                for line in proc.stdout:
+                    if "Downloading" in line or "%" in line:
+                         # Update log sparingly
+                         pass
+                proc.wait()
+
+                if proc.returncode == 0:
+                    self.log(f"Download of {name} {version} complete.")
+                else:
+                    self.log(f"Download of {name} {version} failed.")
+
+            self.root.after(0, self.scan_installers)
+
+        except Exception as e:
+            self.log(f"Download error: {e}")
+        finally:
+            self.root.after(0, lambda: self.create_btn.config(state="normal"))
+
+    def format_disk_dialog(self):
+        disk_str = self.selected_disk.get()
+        if "No external" in disk_str or not disk_str:
+            messagebox.showwarning("Warning", "No disk selected.")
+            return
+
+        disk_id = disk_str.split('(')[1].split(')')[0]
+
+        if messagebox.askyesno("Format Disk", f"WARNING: This will completely ERASE {disk_id} and format it as MacOS Extended (Journaled).\n\nAre you sure?"):
+             threading.Thread(target=self.run_format_disk, args=(disk_id,)).start()
+
+    def run_format_disk(self, disk_id):
+        self.log(f"Formatting {disk_id}...")
+        try:
+            cmd = ['diskutil', 'eraseDisk', 'JHFS+', 'UNTITLED', disk_id]
+            subprocess.run(cmd, check=True)
+            self.log(f"Format complete: {disk_id}")
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Disk Formatted Successfully"))
+            self.root.after(0, self.refresh_hardware)
+        except Exception as e:
+            self.log(f"Format failed: {e}")
+            self.root.after(0, lambda: messagebox.showerror("Error", f"Format failed: {e}"))
 
     def start_creation(self):
         selected_items = self.inst_tree.selection()
@@ -208,33 +413,39 @@ class MultiBootGUI:
             messagebox.showwarning("Warning", "Please select a target disk.")
             return
 
-        # Parse disk ID from string "Name (disk2) - Size"
         try:
             disk_id = disk_str.split('(')[1].split(')')[0]
         except IndexError:
             self.log("Error parsing disk ID.")
             return
 
-        if messagebox.askyesno("Confirm", f"This will ERASE {disk_id}. ALL DATA WILL BE LOST.\nContinue?"):
+        # Check Stubs
+        target_installers = []
+        for item_id in selected_items:
+            tags = self.inst_tree.item(item_id, "tags")
+            values = self.inst_tree.item(item_id)['values']
+            name = values[0]
+
+            if "stub" in tags:
+                messagebox.showerror("Error", f"Cannot use '{name}' because it is a STUB installer.\nPlease download a full version.")
+                return
+
+            # Match to object
+            version = str(values[1])
+            found = False
+            for inst in self.installers_list:
+                if inst['name'] == name and str(inst['version']) == version:
+                    target_installers.append(inst)
+                    found = True
+                    break
+            if not found:
+                self.log(f"Warning: Could not match {name} to source object.")
+
+        if not target_installers: return
+
+        if messagebox.askyesno("Confirm", f"This will ERASE {disk_id}.\n\nInstallers: {len(target_installers)}\nSafety Buffer: {self.buffer_var.get()} GB\n\nALL DATA WILL BE LOST. Continue?"):
             self.log("Starting creation process...")
             self.create_btn.config(state="disabled")
-
-            # Match selected items back to installer objects
-            target_installers = []
-            for item_id in selected_items:
-                values = self.inst_tree.item(item_id)['values']
-                name = values[0]
-                version = str(values[1])
-
-                # Find in local list
-                found = False
-                for inst in self.installers_list:
-                    if inst['name'] == name and str(inst['version']) == version:
-                        target_installers.append(inst)
-                        found = True
-                        break
-                if not found:
-                    self.log(f"Warning: Could not match {name} to source object.")
 
             # Start thread
             threading.Thread(target=self.run_creation_thread, args=(disk_id, target_installers)).start()
@@ -253,8 +464,11 @@ class MultiBootGUI:
                 branding.extract_icon_from_installer(inst['path'], inst['name'])
 
             # 3. Partitioning
-            # Need total disk size. We can get it from disk_detector or check again.
-            # Assuming we can get it from the disk_str logic or querying updater.get_drive_structure
+            # Update buffer constant dynamically?
+            # Ideally core constants should be configurable.
+            # Hack: modify global for this run
+            constants.OS_DATABASE["default_buffer"] = self.buffer_var.get()
+
             import operations.updater
             struct = operations.updater.get_drive_structure(disk_id)
             if not struct:
@@ -270,12 +484,9 @@ class MultiBootGUI:
                 return
 
             self.log("Partitioning successful. Waiting for volumes to mount...")
-            time.sleep(3)
+            time.sleep(5)
 
             # 4. Installation
-            # We need to find the partitions.
-            # Assumption: s2 is custom EFI, s3 is first installer?
-            # Or use names.
             current_partitions = partitioner.get_partition_list(disk_id)
 
             for inst in installers:
@@ -290,8 +501,8 @@ class MultiBootGUI:
                 target_part = next((p for p in current_partitions if p['name'] == expected_vol_name), None)
 
                 if not target_part:
-                    # Fallback: try to find by index if names fail?
-                    # Or re-scan partitions
+                    # Retry scan
+                    time.sleep(2)
                     current_partitions = partitioner.get_partition_list(disk_id)
                     target_part = next((p for p in current_partitions if p['name'] == expected_vol_name), None)
 
@@ -300,8 +511,6 @@ class MultiBootGUI:
                     continue
 
                 # Get mount point
-                # installer_runner needs mount point.
-                # If partition is unmounted, mount it.
                 part_id = target_part['id']
                 # extract partition number
                 part_num = part_id.replace(disk_id, '').replace('s', '')
@@ -310,6 +519,7 @@ class MultiBootGUI:
                 if not mount_point:
                     self.log(f"Mounting {part_id}...")
                     subprocess.run(['diskutil', 'mount', part_id])
+                    time.sleep(1)
                     mount_point = installer_runner.get_volume_mount_point(disk_id, part_num)
 
                 if not mount_point:
@@ -317,11 +527,8 @@ class MultiBootGUI:
                     continue
 
                 # Run createinstallmedia
-                # We can pass a callback to update log
                 def progress_cb(pct):
-                    # We could update a progress bar here
-                    # For now just log sparingly
-                    if pct % 10 == 0:
+                    if pct % 5 == 0:
                         self.log(f"  {inst['name']}: {pct}%")
 
                 self.log(f"Running createinstallmedia for {inst['name']}...")
@@ -332,7 +539,7 @@ class MultiBootGUI:
                 if success:
                     self.log(f"Installation of {inst['name']} complete.")
                     # Branding
-                    # Re-fetch mount point as name changes
+                    # Re-fetch mount point
                     new_mount = installer_runner.get_volume_mount_point(disk_id, part_num)
                     if new_mount:
                         branding.apply_full_branding(new_mount, inst['name'], os_name, inst['version'])
@@ -352,7 +559,6 @@ class MultiBootGUI:
 
 def launch(config=None):
     if os.geteuid() != 0:
-        # Warn but allow launch, though operations will fail if sudo not cached
         print("Warning: Running GUI without root. Operations may fail.")
 
     root = tk.Tk()
