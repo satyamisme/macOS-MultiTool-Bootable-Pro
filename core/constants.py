@@ -19,10 +19,10 @@ OS_DATABASE = {
     "10.13": {"name": "High Sierra", "buffer_gb": 1.0, "min_year": 2017},
 }
 
-# Filesystem overhead constants
-HFS_OVERHEAD_MULTIPLIER = 0.10  # 10% overhead for HFS+
-BOOT_FILES_GB = 1.0              # Space for boot files
-MIN_PARTITION_GB = 5             # Minimum partition size
+# Filesystem overhead constants (Optimized for density)
+HFS_OVERHEAD_MULTIPLIER = 0.05  # Reduced to 5% overhead for HFS+ (Installer volumes are mostly read-only)
+BOOT_FILES_MB = 200             # Reduced to 200MB for boot files (EFI/Preboot)
+MIN_PARTITION_MB = 5500         # ~5.5GB Minimum
 
 def calculate_partition_size(installer_size_kb: int, version_string: str, override_buffer_gb: float = None) -> int:
     """
@@ -34,28 +34,27 @@ def calculate_partition_size(installer_size_kb: int, version_string: str, overri
         override_buffer_gb: Optional custom safety buffer in GB
 
     Returns:
-        int: Required partition size in GB (rounded up)
+        int: Required partition size in MB (rounded up)
     """
-    # Convert to GB
-    installer_gb = float(installer_size_kb) / (1024 * 1024)
+    # Convert input to MB
+    installer_mb = float(installer_size_kb) / 1024
 
-    # Get buffer
+    # Get buffer (convert GB to MB)
     if override_buffer_gb is not None:
-        buffer_gb = override_buffer_gb
+        buffer_mb = override_buffer_gb * 1024
     else:
         # Fallback to database or global default
         version_key = _extract_version_key(version_string)
-        # Check if default_buffer was injected into OS_DATABASE (hack supported for backward compat)
         default = OS_DATABASE.get("default_buffer", 1.0)
         os_info = OS_DATABASE.get(version_key, {"buffer_gb": default})
-        buffer_gb = os_info["buffer_gb"]
+        buffer_mb = os_info["buffer_gb"] * 1024
 
     # Calculate total
-    hfs_overhead = installer_gb * HFS_OVERHEAD_MULTIPLIER
-    total_gb = installer_gb + hfs_overhead + BOOT_FILES_GB + buffer_gb
+    hfs_overhead = installer_mb * HFS_OVERHEAD_MULTIPLIER
+    total_mb = installer_mb + hfs_overhead + BOOT_FILES_MB + buffer_mb
 
     # Round up and enforce minimum
-    return max(MIN_PARTITION_GB, math.ceil(total_gb))
+    return max(MIN_PARTITION_MB, math.ceil(total_mb))
 
 def get_os_name(version_string):
     """Get friendly OS name from version string."""
