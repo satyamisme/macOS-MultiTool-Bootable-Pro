@@ -25,7 +25,7 @@ class MultiBootGUI:
         self.root = root
         self.config = config
         self.root.title("macOS Multi-Tool Pro")
-        self.root.geometry("1000x800")
+        self.root.geometry("1000x850")
 
         # Variables
         self.selected_disk = tk.StringVar()
@@ -173,6 +173,10 @@ class MultiBootGUI:
         self.space_label = ttk.Label(settings_frame, text="Required: 0.0 GB | Available: 0.0 GB | Select Installers & Disk", font=("Arial", 10, "bold"))
         self.space_label.pack(fill="x", padx=10, pady=10)
 
+        # Visualization Canvas
+        self.viz_canvas = tk.Canvas(settings_frame, height=30, bg="white")
+        self.viz_canvas.pack(fill="x", padx=10, pady=5)
+
         # Action Button
         self.create_btn = ttk.Button(bottom_frame, text="CREATE BOOTABLE USB", command=self.start_creation)
         self.create_btn.pack(fill="x", padx=20, pady=10)
@@ -275,26 +279,61 @@ class MultiBootGUI:
 
     def update_space_usage(self, event=None):
         selected_items = self.get_selected_installers()
-        total_required = 0.0
+
+        # Calculate Total Required using Partitioner Logic
+        total_required_gb = 0.0
+
+        # Start with EFI (1GB fixed in partitioner usually, though constants says BOOT_FILES_GB=1.0)
+        # partitioner logic: EFI (1GB) + Installers + Data
+        # constants.BOOT_FILES_GB is included in calculate_partition_size?
+        # Checking constants.py: total_gb = installer + overhead + BOOT_FILES_GB + buffer
+        # Wait, BOOT_FILES_GB in constants is 1.0. Does this mean per partition?
+        # No, partitioner creates ONE EFI partition for the disk.
+        # But calculate_partition_size is used for EACH installer partition.
+        # Let's double check partitioner.py logic (from memory/previous steps):
+        # It calls calculate_partition_size for each installer.
+        # So it sums up: (Size + Overhead + 1.0 + Buffer).
+        # This seems redundant if EFI is separate.
+        # But `create_multiboot_layout` likely sums these up.
+
+        # Let's align exactly with updated constants.py which I just wrote.
+        # It adds BOOT_FILES_GB (1.0) to every partition.
+        # This might be overkill if intended for the single EFI, but it's safe.
+
+        # Visualization Data
+        segments = []
+
+        # Add EFI segment (Always first, ~200MB - 1GB)
+        segments.append({"name": "EFI", "size": 0.2, "color": "gray"})
+        total_required_gb += 0.2
 
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
-            try:
-                size_gb = float(values[3].split()[0])
-            except: size_gb = 0.0
+            name = values[1]
+            version = str(values[2])
 
+            # Size KB
+            size_kb = 0
+            # Find in installers_list to get KB
+            for inst in self.installers_list:
+                if inst['name'] == name and str(inst['version']) == version:
+                    size_kb = inst['size_kb']
+                    break
+
+            # Buffer
             try:
                 buffer_gb = float(values[4].split()[0])
             except: buffer_gb = 2.0
 
-            overhead = size_gb * 0.15
-            total_required += size_gb + overhead + buffer_gb
+            # Use Core Logic
+            part_size = constants.calculate_partition_size(size_kb, version, override_buffer_gb=buffer_gb)
 
-        if selected_items:
-             total_required += 0.5 # EFI
+            total_required_gb += part_size
+            segments.append({"name": name, "size": part_size, "color": "#4a90e2"})
 
-        self.total_required_gb = total_required
+        self.total_required_gb = total_required_gb
 
+        # Available Space
         disk_str = self.selected_disk.get()
         available_gb = 0.0
         if disk_str and "No external" not in disk_str:
@@ -305,6 +344,12 @@ class MultiBootGUI:
                 available_gb = 0.0
         self.current_disk_size_gb = available_gb
 
+        # Add Data Partition Segment if space remains
+        if available_gb > total_required_gb:
+            rem = available_gb - total_required_gb
+            segments.append({"name": "DATA", "size": rem, "color": "#50e3c2"})
+
+        # Update Label
         color = "black"
         status_text = "Ready"
 
@@ -327,6 +372,27 @@ class MultiBootGUI:
             text=f"Required: {self.total_required_gb:.1f} GB | Capacity: {available_gb:.1f} GB | {status_text}",
             foreground=color
         )
+
+        self.draw_viz(segments, available_gb)
+
+    def draw_viz(self, segments, total_capacity):
+        self.viz_canvas.delete("all")
+        if total_capacity <= 0: return
+
+        w = self.viz_canvas.winfo_width()
+        h = self.viz_canvas.winfo_height()
+        # Fallback if unmapped
+        if w < 10: w = 900
+
+        current_x = 0
+        scale = w / total_capacity
+
+        for seg in segments:
+            width = seg["size"] * scale
+            self.viz_canvas.create_rectangle(current_x, 0, current_x + width, h, fill=seg["color"], outline="white")
+            if width > 30: # Only text if wide enough
+                self.viz_canvas.create_text(current_x + width/2, h/2, text=f"{seg['name'][:10]}", fill="black", font=("Arial", 8))
+            current_x += width
 
     def refresh_hardware(self):
         self.log("Scanning hardware...")
@@ -409,6 +475,7 @@ class MultiBootGUI:
             self.context_menu.post(event.x_root, event.y_root)
 
     def delete_selected_installer(self):
+        # We delete rows that are highlighted (Tk selection), not checked boxes
         selected = self.inst_tree.selection()
         if not selected: return
 
@@ -459,6 +526,7 @@ class MultiBootGUI:
         top.title("Select Version to Download")
         top.geometry("800x500")
 
+        # Checkbox column here too? Yes
         cols = ("Select", "Name", "Version", "Build", "Size", "Date", "Status")
         tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="extended")
 
@@ -584,7 +652,7 @@ class MultiBootGUI:
             for inst in self.installers_list:
                 if inst['name'] == name and str(inst['version']) == version:
                     found = inst.copy()
-                    found['buffer_gb'] = buffer_val
+                    found['buffer_gb'] = buffer_val # Inject custom buffer
                     break
             if found: target_installers.append(found)
 
@@ -609,23 +677,10 @@ class MultiBootGUI:
             total_size_gb = struct['disk_size'] / 1e9 if struct else 0
 
             self.log(f"Partitioning {disk_id}...")
-            # Implicitly pass custom buffer by setting default?
-            # No, partitioner needs per-item buffer logic.
-            # Partitioner uses constants.py which looks up DB.
-            # We are constrained by existing partitioner signature.
-            # However, partitioner.create_multiboot_layout uses constants.calculate_partition_size.
-            # This is a limitation. For now, the user setting updates the DEFAULT buffer global in main thread.
-            # To strictly support per-item, we'd need to refactor partitioner.py.
-            # But earlier we updated 'constants.OS_DATABASE["default_buffer"]' which is a hack.
-            # Let's trust the hack for now as refactoring partitioner is out of scope for this specific step
-            # (which was just GUI update). But wait, we DID claim to support per-item buffer.
-            # We should inject the buffer into the installer dict, and then in partitioner...
-            # Actually, let's just update the global to the MAX of the selected buffers to be safe?
-            # Or average?
-            # No, we need to pass it.
-            # Since we can't easily change partitioner signature without breaking other things,
-            # let's assume the partitioner uses the 'buffer_gb' key if present in installer dict.
-            # I will need to patch partitioner.py in next step to be sure.
+
+            # Pass custom buffers is now handled because partitioner calls calculate_partition_size
+            # But wait, partitioner calls it with (size_kb, version). It doesn't pass buffer_gb.
+            # We need to update partitioner.py to pass the buffer if present in installer dict.
 
             success = partitioner.create_multiboot_layout(disk_id, installers, total_size_gb)
 
