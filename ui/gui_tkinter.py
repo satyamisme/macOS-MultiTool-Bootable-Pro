@@ -24,7 +24,7 @@ class MultiBootGUI:
         self.root = root
         self.config = config
         self.root.title("macOS Multi-Tool Pro")
-        self.root.geometry("900x700")
+        self.root.geometry("950x700")
 
         # Variables
         self.selected_disk = tk.StringVar()
@@ -118,7 +118,7 @@ class MultiBootGUI:
         settings_frame = ttk.LabelFrame(bottom_frame, text="3. Settings")
         settings_frame.pack(fill="x", padx=5, pady=5)
 
-        # Buffer Slider (Not hooked up to backend logic yet, but visual request)
+        # Buffer Slider
         ttk.Label(settings_frame, text="Safety Buffer (GB):").pack(side="left", padx=5)
         self.buffer_var = tk.DoubleVar(value=2.0)
         self.buffer_scale = ttk.Scale(settings_frame, from_=0.5, to=10.0, variable=self.buffer_var, orient="horizontal")
@@ -253,8 +253,8 @@ class MultiBootGUI:
 
     def open_download_dialog(self):
         # Ask for search term
-        search = simpledialog.askstring("Download Installer", "Enter macOS Name or Version (e.g. 'Sonoma', '13.6'):")
-        if not search: return
+        search = simpledialog.askstring("Download Installer", "Enter search term (e.g. 'Sonoma', '13.6', '12') [Empty for All]:")
+        # Allow empty to show list? simpledialog returns '' if OK pressed with empty.
 
         self.log(f"Searching Mist for '{search}'...")
         threading.Thread(target=self.run_mist_search, args=(search,)).start()
@@ -267,27 +267,15 @@ class MultiBootGUI:
                 self.log("Mist-CLI missing. Attempting install...")
                 mist_downloader.install_mist()
 
-            # List available
-            # mist list installer <search> --output-type json
-            cmd = ['mist', 'list', 'installer', search_term, '--output-type', 'json', '--quiet']
-            result = subprocess.run(cmd, capture_output=True, text=True)
+            # Use new structured list function
+            installers = mist_downloader.list_installers(search_term)
 
-            if result.returncode != 0:
-                self.log(f"Mist search failed: {result.stderr}")
-                return
-
-            try:
-                data = json.loads(result.stdout)
-            except:
-                self.log("Failed to parse Mist output.")
-                return
-
-            if not data:
+            if not installers:
                 self.log("No installers found matching that term.")
                 return
 
             # Show results in a new dialog window
-            self.root.after(0, lambda: self.show_download_selection(data))
+            self.root.after(0, lambda: self.show_download_selection(installers))
 
         except Exception as e:
             self.log(f"Error searching: {e}")
@@ -298,28 +286,47 @@ class MultiBootGUI:
         # Create a TopLevel window
         top = tk.Toplevel(self.root)
         top.title("Select Version to Download")
-        top.geometry("600x400")
+        top.geometry("800x500")
 
-        cols = ("Name", "Version", "Build", "Size", "Date")
-        tree = ttk.Treeview(top, columns=cols, show="headings")
+        cols = ("Name", "Version", "Build", "Size", "Date", "Status")
+        tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="extended")
+
         for c in cols:
             tree.heading(c, text=c)
-            tree.column(c, width=100)
+            if c == "Name":
+                tree.column(c, width=200)
+            else:
+                tree.column(c, width=100)
+
         tree.pack(fill="both", expand=True, padx=10, pady=10)
 
+        # Insert data
         for item in data:
-            # Mist JSON keys: name, version, build, size, date
-            # Size is bytes, convert to GB
             size_bytes = item.get('size', 0)
-            size_gb = size_bytes / (1024**3)
+            size_gb = f"{size_bytes / (1024**3):.1f} GB"
 
-            tree.insert("", "end", values=(
+            status_flags = []
+            if item.get('downloaded'): status_flags.append("Installed")
+            if item.get('latest'): status_flags.append("Latest")
+            status_str = ", ".join(status_flags)
+
+            item_id = tree.insert("", "end", values=(
                 item.get('name'),
                 item.get('version'),
                 item.get('build'),
-                f"{size_gb:.2f} GB",
-                item.get('date')
+                size_gb,
+                item.get('date'),
+                status_str
             ))
+
+            # Highlighting
+            if item.get('latest'):
+                tree.item(item_id, tags=("latest",))
+            if item.get('downloaded'):
+                tree.item(item_id, tags=("installed",))
+
+        tree.tag_configure("latest", font=("TkDefaultFont", 10, "bold"))
+        tree.tag_configure("installed", foreground="gray")
 
         def do_download():
             sel = tree.selection()
@@ -327,12 +334,28 @@ class MultiBootGUI:
 
             selected_items = []
             for s in sel:
-                # We need a way to identify it for download. Mist uses name or version.
-                # Ideally we pass name + version to be specific.
+                # Get raw data mapping logic?
+                # Tree view values are strings.
+                # Ideally we want the identifier which isn't shown but is in data.
+                # We can store identifier in tags or lookup.
+                # Simple lookup by values since Name+Version+Build is unique enough.
+
                 vals = tree.item(s)['values']
                 name = vals[0]
-                version = vals[1]
-                selected_items.append((name, version))
+                version = str(vals[1])
+                build = str(vals[2])
+
+                # Find matching identifier in original data
+                identifier = None
+                for d in data:
+                    if d.get('name') == name and d.get('version') == version and d.get('build') == build:
+                        identifier = d.get('identifier')
+                        break
+
+                if identifier:
+                    selected_items.append((identifier, name))
+                else:
+                    selected_items.append((None, name)) # Fallback
 
             top.destroy()
 
@@ -345,32 +368,20 @@ class MultiBootGUI:
     def run_download_process(self, items):
         self.create_btn.config(state="disabled")
         try:
-            for name, version in items:
-                self.log(f"Downloading {name} {version}...")
-                # Call mist with version specific flag?
-                # mist_downloader.download_installer usually takes just name list.
-                # We can modify it or just pass name if it picks latest.
-                # Ideally: mist download installer "Name" --version "Version" application
+            for identifier, name in items:
+                self.log(f"Downloading {name}...")
 
-                # Check mist_downloader implementation. It takes os_names list.
-                # Let's call subprocess directly here for precision or update mist_downloader.
-                # Updating mist_downloader to support explicit version is better, but let's do direct call here for GUI precision.
-
-                cmd = ['mist', 'download', 'installer', name, 'application', '--force', '--version', str(version)]
-
-                # We want to capture output for progress?
-                # For now just blocking run.
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-                for line in proc.stdout:
-                    if "Downloading" in line or "%" in line:
-                         # Update log sparingly
-                         pass
-                proc.wait()
-
-                if proc.returncode == 0:
-                    self.log(f"Download of {name} {version} complete.")
+                if identifier:
+                    if mist_downloader.download_installer_by_identifier(identifier, name):
+                         self.log(f"Download of {name} complete.")
+                    else:
+                         self.log(f"Download of {name} failed.")
                 else:
-                    self.log(f"Download of {name} {version} failed.")
+                    # Fallback
+                    if mist_downloader.download_installer([name]):
+                        self.log(f"Download of {name} complete.")
+                    else:
+                        self.log(f"Download of {name} failed.")
 
             self.root.after(0, self.scan_installers)
 
