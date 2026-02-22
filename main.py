@@ -71,56 +71,55 @@ def mode_create_new(cfg: config.Config):
                 return # Return to main menu instead of exit
 
         print(f"\nFound {len(installers)} installer(s):\n")
+
+        # Validate installers
+        valid_installers = []
+        restart_scan = False
+        for inst in installers:
+            is_stub = stub_validator.is_stub_installer(inst['path'])
+            inst['is_stub'] = is_stub
+
+            status = f"{display.Colors.YELLOW}STUB{display.Colors.END}" if is_stub else f"{display.Colors.GREEN}FULL{display.Colors.END}"
+            size = display.format_size(inst['size_kb'] * 1024)
+
+            print(f"  • {inst['name']}")
+            print(f"    Version: {inst['version']} | Size: {size} | Status: {status}")
+
+            if not is_stub:
+                valid_installers.append(inst)
+            else:
+                # Offer to download full installer
+                reason = stub_validator.get_stub_reason(inst['path'])
+                print(f"    Reason: {reason}")
+
+                if prompts.prompt_yes_no(f"    Download full installer for {inst['name']}?", 'n'):
+                    # Try to guess OS name from the app name first (more reliable for weird versions)
+                    # e.g., "Install macOS Catalina.app" -> "Catalina"
+                    os_name = inst['name'].replace("Install macOS ", "").replace(".app", "")
+
+                    # Fallback to version-based lookup if name parsing looks weird
+                    if not os_name or len(os_name) > 20 or " " in os_name:
+                         os_name = constants.get_os_name(inst['version'])
+
+                    if mist_downloader.download_installer(os_name):
+                        display.print_success(f"Downloaded {os_name}")
+                        restart_scan = True
+                        break
+                    else:
+                        display.print_error("Download failed")
+
+        if restart_scan:
+            continue
+
+        if not valid_installers:
+            display.print_error("No valid full installers available")
+            if prompts.prompt_yes_no("Download a macOS installer now?"):
+                 mode_download_installer()
+                 continue
+            else:
+                 return
+
         break
-
-    # Validate installers
-    valid_installers = []
-    restart_scan = False
-    for inst in installers:
-        is_stub = stub_validator.is_stub_installer(inst['path'])
-        inst['is_stub'] = is_stub
-
-        status = f"{display.Colors.YELLOW}STUB{display.Colors.END}" if is_stub else f"{display.Colors.GREEN}FULL{display.Colors.END}"
-        size = display.format_size(inst['size_kb'] * 1024)
-
-        print(f"  • {inst['name']}")
-        print(f"    Version: {inst['version']} | Size: {size} | Status: {status}")
-
-        if not is_stub:
-            valid_installers.append(inst)
-        else:
-            # Offer to download full installer
-            reason = stub_validator.get_stub_reason(inst['path'])
-            print(f"    Reason: {reason}")
-
-            if prompts.prompt_yes_no(f"    Download full installer for {inst['name']}?", 'n'):
-                # Try to guess OS name from the app name first (more reliable for weird versions)
-                # e.g., "Install macOS Catalina.app" -> "Catalina"
-                os_name = inst['name'].replace("Install macOS ", "").replace(".app", "")
-
-                # Fallback to version-based lookup if name parsing looks weird
-                if not os_name or len(os_name) > 20 or " " in os_name:
-                     os_name = constants.get_os_name(inst['version'])
-
-                if mist_downloader.download_installer(os_name):
-                    display.print_success(f"Downloaded {os_name}")
-                    restart_scan = True
-                    break
-                else:
-                    display.print_error("Download failed")
-
-    if restart_scan:
-        continue
-
-    if not valid_installers:
-        display.print_error("No valid full installers available")
-        # Ensure 'continue' is inside the main 'while True' loop
-        # This block is inside 'while True', so 'continue' is valid.
-        if prompts.prompt_yes_no("Download a macOS installer now?"):
-             mode_download_installer()
-             continue
-        else:
-             return
 
     # Step 2: Select USB drive
     while True:
