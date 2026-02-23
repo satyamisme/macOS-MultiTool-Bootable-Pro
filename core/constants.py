@@ -17,6 +17,8 @@ OS_DATABASE = {
     "10.15": {"name": "Catalina", "buffer_gb": 1.5, "min_year": 2019},
     "10.14": {"name": "Mojave", "buffer_gb": 1.5, "min_year": 2018},
     "10.13": {"name": "High Sierra", "buffer_gb": 1.0, "min_year": 2017},
+    "10.12": {"name": "Sierra", "buffer_gb": 1.0, "min_year": 2016},
+    "10.11": {"name": "El Capitan", "buffer_gb": 1.0, "min_year": 2015},
 }
 
 # Filesystem overhead constants (Optimized for density)
@@ -56,8 +58,25 @@ def calculate_partition_size(installer_size_kb: int, version_string: str, overri
     # Round up and enforce minimum
     return max(MIN_PARTITION_MB, math.ceil(total_mb))
 
-def get_os_name(version_string):
-    """Get friendly OS name from version string."""
+def get_os_name(version_string, installer_name=None):
+    """
+    Get friendly OS name from version string or installer name.
+    Prioritizes explicit name mapping if version parsing is ambiguous.
+    """
+    # 1. Try Name-based lookup first (More reliable for older installers with updated app versions)
+    if installer_name:
+        clean_name = installer_name.replace("Install macOS ", "").replace("Install ", "").replace(".app", "")
+        # Check against DB names
+        for key, info in OS_DATABASE.items():
+            if info['name'].lower() in clean_name.lower():
+                return info['name']
+
+        # Special case for Sierra/El Capitan which might not match exact key
+        if "Sierra" in clean_name and "High" not in clean_name: return "Sierra"
+        if "High Sierra" in clean_name: return "High Sierra"
+        if "El Capitan" in clean_name: return "El Capitan"
+
+    # 2. Fallback to version-based lookup
     version_key = _extract_version_key(version_string)
     return OS_DATABASE.get(version_key, {}).get("name", "macOS")
 
@@ -65,6 +84,7 @@ def _extract_version_key(version_string):
     """
     Extract version key for database lookup.
     Handles: "14.6.1", "15.2 Beta", "10.15.7-alpha", "15.0 Beta 3"
+    Also handles updated installer app versions: "13.6.02" (High Sierra 10.13 installer updated in 2020)
     """
     # Clean version string: remove "Beta", "RC", etc.
     # Split by space first, take first part.
@@ -74,10 +94,21 @@ def _extract_version_key(version_string):
     try:
         parts = clean.split('.')
 
+        # Case 1: Standard "10.xx" (Yosemite to Catalina)
         if parts[0] == "10" and len(parts) >= 2:
             return f"{parts[0]}.{parts[1]}"  # "10.15"
-        else:
-            # Handle standard major versions (11, 12, 13, 14, 15, 26, etc)
+
+        # Case 2: Major versions (Big Sur+)
+        # 11, 12, 13, 14, 15...
+        if int(parts[0]) >= 11:
+            # Check for the High Sierra anomaly where version is "13.6.02" but it's actually 10.13 installer app version
+            # This is tricky without the Name.
+            # Ideally get_os_name uses the name.
+            # Here we just return the major version.
+            # If we return "13", it maps to Ventura.
+            # This logic flaw is why get_os_name needs to use the Name.
             return parts[0]
-    except (IndexError, ValueError):
+
         return "11"  # Default fallback
+    except (IndexError, ValueError):
+        return "11"

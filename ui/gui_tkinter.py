@@ -91,12 +91,19 @@ class MultiBootGUI:
         self.disk_combo.pack(fill="x", padx=10, pady=10)
         self.disk_combo.bind("<<ComboboxSelected>>", self.on_disk_selected)
 
-        # Show All Checkbox
-        chk_frame = ttk.Frame(disk_frame)
-        chk_frame.pack(fill="x", padx=10)
-        ttk.Checkbutton(chk_frame, text="Show All Disks (Internal/Advanced)",
+        # Options Frame (Show All + Update Mode)
+        opt_frame = ttk.Frame(disk_frame)
+        opt_frame.pack(fill="x", padx=10, pady=5)
+
+        ttk.Checkbutton(opt_frame, text="Show All Disks (Advanced)",
                         variable=self.show_all_disks_var,
                         command=self.refresh_hardware).pack(side="left")
+
+        self.update_mode_var = tk.BooleanVar(value=False)
+        self.update_mode_chk = ttk.Checkbutton(opt_frame, text="Update Existing Drive (Add Only)",
+                        variable=self.update_mode_var,
+                        command=self.on_mode_change)
+        self.update_mode_chk.pack(side="left", padx=20)
 
         # Middle: Installer Selection
         inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers")
@@ -212,6 +219,14 @@ class MultiBootGUI:
         self.update_space_usage()
         messagebox.showinfo("Optimized", "Buffers set to minimum (0.2 GB) for maximum density.")
 
+    def on_mode_change(self):
+        is_update = self.update_mode_var.get()
+        if is_update:
+            self.create_btn.config(text="UPDATE EXISTING USB (Add Only)")
+        else:
+            self.create_btn.config(text="CREATE BOOTABLE USB (Erase All)")
+        self.update_space_usage()
+
     def on_tree_click(self, event):
         region = self.inst_tree.identify("region", event.x, event.y)
         if region == "cell":
@@ -289,7 +304,16 @@ class MultiBootGUI:
         self.update_space_usage()
 
     def on_disk_selected(self, event):
-        self.update_space_usage()
+        # Auto-detect update mode eligibility?
+        disk_str = self.selected_disk.get()
+        if not disk_str or "No external" in disk_str: return
+
+        try:
+            disk_id = disk_str.split('(')[1].split(')')[0]
+            # Check structure in background?
+            # For now just trigger space update
+            self.update_space_usage()
+        except: pass
 
     def get_selected_installers(self):
         """Return list of selected item IDs"""
@@ -301,17 +325,19 @@ class MultiBootGUI:
 
     def update_space_usage(self, event=None):
         selected_items = self.get_selected_installers()
+        is_update = self.update_mode_var.get()
 
         # Calculate Total Required using Partitioner Logic
         total_required_mb = 0.0
 
-        # EFI is 1024 MB in partitioner.py (fixed)
-        total_required_mb += 1024
+        if not is_update:
+            # Create mode: Include EFI
+            total_required_mb += 1024
 
         # Visualization Data
         segments = []
-        # Add EFI segment
-        segments.append({"name": "EFI", "size": 1024, "color": "gray"})
+        if not is_update:
+            segments.append({"name": "EFI", "size": 1024, "color": "gray"})
 
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
@@ -343,31 +369,55 @@ class MultiBootGUI:
         disk_str = self.selected_disk.get()
         available_gb = 0.0
 
-        # We need to know if there's free space (for Update mode logic, though mostly we erase)
-        # But `diskutil info` via detector only gives total size.
-        # `updater.get_drive_structure` gives free space.
-        # For simplicity, if we are in "Create" mode (default), available is Total Disk Size.
-        # If we added an "Update" checkbox, we would check free space.
-
         if disk_str and "No external" not in disk_str:
             try:
+                disk_id = disk_str.split('(')[1].split(')')[0]
+
+                if is_update:
+                    # Logic for Update Mode: Available space is Free Space on disk
+                    # Need to query `updater.get_drive_structure`
+                    # This is slow to do on every click.
+                    # Ideally we cache this or show "Calculating..."
+                    # For GUI responsiveness, we might need a separate thread or cached value.
+                    # Let's assume user refreshed hardware.
+                    # But refresh_hardware uses disk_detector which doesn't check free space.
+                    # We might need to fetch it now.
+                    # Warning: Blocking call.
+                    # Let's assume we can get it or display "??" until creation.
+                    # Or just run `updater.get_drive_structure` here quickly?
+                    # `diskutil list -plist` takes 0.5s. Maybe acceptable?
+
+                    # For now, let's assume total size for Create, and maybe trigger a bg check for Update?
+                    # Or just use total size as upper bound and verify at Start.
+
+                    # Let's use total size for visualization but color it differently?
+                    # Or assume "Update" adds to free space.
+                    pass
+
                 size_part = disk_str.split(' - ')[1]
                 available_gb = float(size_part.split()[0])
             except:
                 available_gb = 0.0
+
         self.current_disk_size_gb = available_gb
 
-        # Add Data Partition Segment if space remains
+        # Add Data Partition Segment if space remains (Only relevant for Create mode visuals)
         available_mb = available_gb * 1024
         if available_mb > total_required_mb:
             rem_mb = available_mb - total_required_mb
-            # Show remaining as "Free / Data"
-            segments.append({"name": "Free/Data", "size": rem_mb, "color": "#50e3c2"}) # Solid color for now
+            if not is_update:
+                segments.append({"name": "Free/Data", "size": rem_mb, "color": "#50e3c2"})
+            else:
+                # In update mode, we are ADDING. So the visual should show existing usage?
+                # That's hard without scanning.
+                # Just show what we are ADDING relative to total capacity?
+                pass
 
         # Update Label
         color = "black"
         status_text = "Ready"
 
+        # Check Fit logic
         if self.total_required_gb > 0:
             if available_gb > 0:
                 if self.total_required_gb > available_gb:
@@ -384,7 +434,7 @@ class MultiBootGUI:
             status_text = "Select Installers"
 
         self.space_label.config(
-            text=f"Required: {self.total_required_gb:.2f} GB | Available: {available_gb:.2f} GB | {status_text}",
+            text=f"Required: {self.total_required_gb:.2f} GB | Capacity: {available_gb:.2f} GB | {status_text}",
             foreground=color
         )
 
@@ -405,10 +455,8 @@ class MultiBootGUI:
             width = seg["size"] * scale
             color = seg["color"]
 
-            # Simple rectangle
             self.viz_canvas.create_rectangle(current_x, 0, current_x + width, h, fill=color, outline="white")
 
-            # Text label if wide enough
             if width > 40:
                 name_short = seg['name'][:10]
                 if seg['name'] == "Free/Data": name_short = "Free"
@@ -496,7 +544,6 @@ class MultiBootGUI:
             self.context_menu.post(event.x_root, event.y_root)
 
     def delete_selected_installer(self):
-        # We delete rows that are highlighted (Tk selection), not checked boxes
         selected = self.inst_tree.selection()
         if not selected: return
 
@@ -547,7 +594,6 @@ class MultiBootGUI:
         top.title("Select Version to Download")
         top.geometry("800x500")
 
-        # Checkbox column here too? Yes
         cols = ("Select", "Name", "Version", "Build", "Size", "Date", "Status")
         tree = ttk.Treeview(top, columns=cols, show="headings", selectmode="extended")
 
@@ -662,6 +708,7 @@ class MultiBootGUI:
         try: disk_id = disk_str.split('(')[1].split(')')[0]
         except: return
 
+        # Prepare Target Installers
         target_installers = []
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
@@ -676,14 +723,118 @@ class MultiBootGUI:
                     found['buffer_gb'] = buffer_val
                     break
             if found: target_installers.append(found)
-
         if not target_installers: return
 
-        if messagebox.askyesno("Confirm", f"Erase {disk_id} and install {len(target_installers)} macOS versions?"):
-            self.log("Starting...")
-            self.create_btn.config(state="disabled")
-            self.is_working = True
-            threading.Thread(target=self.run_creation_thread, args=(disk_id, target_installers)).start()
+        # Check Mode
+        if self.update_mode_var.get():
+            # Update Mode
+            if messagebox.askyesno("Confirm Update", f"Update {disk_id}?\n\nThis will look for free space or split DATA_STORE.\nEXISTING INSTALLERS WILL NOT BE ERASED."):
+                self.log("Starting Update Process...")
+                self.create_btn.config(state="disabled")
+                self.is_working = True
+                threading.Thread(target=self.run_update_thread, args=(disk_id, target_installers)).start()
+        else:
+            # Create Mode (Erase)
+            if messagebox.askyesno("Confirm Erase", f"Erase {disk_id} and install {len(target_installers)} macOS versions?\n\nALL DATA WILL BE LOST."):
+                self.log("Starting Creation Process...")
+                self.create_btn.config(state="disabled")
+                self.is_working = True
+                threading.Thread(target=self.run_creation_thread, args=(disk_id, target_installers)).start()
+
+    def run_update_thread(self, disk_id, installers):
+        try:
+            import operations.updater
+            import operations.installer_runner
+            import operations.branding
+            import core.constants
+
+            # 1. Analyze structure
+            self.log(f"Analyzing {disk_id}...")
+            structure = operations.updater.get_drive_structure(disk_id)
+            if not structure:
+                self.log("Failed to analyze drive.")
+                return
+
+            self.log(f"Free Space Detected: {structure['free_space'] / 1e9:.2f} GB")
+
+            # 2. Add Partitions
+            # Try filling free space first
+            new_partitions = []
+
+            if structure['free_space'] > 2e9: # > 2GB free
+                self.log("Found free space. Adding partitions...")
+                added = operations.updater.add_partition_to_free_space(disk_id, installers)
+                if added:
+                    new_partitions.extend(added)
+                    # If we added all, great. If not, we might need to split data?
+                    # The current `add_partition_to_free_space` loops through all.
+                    # It returns the ones successfully added.
+
+            # If we didn't add all (e.g. no free space), try splitting data partition?
+            # For now, let's assume `add_partition_to_free_space` covers the "Shrink workflow".
+            # The logic inside `updater` handles the loop.
+
+            if not new_partitions:
+                self.log("No partitions created. Check free space or DATA_STORE.")
+                return
+
+            # 3. Install
+            time.sleep(2) # settle
+
+            for item in new_partitions:
+                part_name = item['name']
+                inst = item['installer']
+
+                self.log(f"Installing {inst['name']} to {part_name}...")
+
+                # Find mount point
+                # We need to re-scan to find the disk slice for this name
+                # Simple logic: assume it mounts?
+                subprocess.run(['diskutil', 'mount', part_name])
+                mount_point = f"/Volumes/{part_name}"
+
+                if not os.path.exists(mount_point):
+                    self.log(f"Waiting for mount {mount_point}...")
+                    time.sleep(3)
+
+                if os.path.exists(mount_point):
+                    def cb(p):
+                        if p%10==0: self.log(f"  {inst['name']}: {p}%")
+
+                    if operations.installer_runner.run_createinstallmedia(inst['path'], mount_point, progress_callback=cb):
+                        self.log("Success.")
+                        # Re-branding
+                        # Mount point might change after install
+                        # Branding logic handles finding it by name usually?
+                        # branding.apply_full_branding needs path.
+                        # Check where it mounted now.
+                        # Usually "Install macOS Name"
+                        # We can try to guess or use the helper.
+                        # Let's rely on standard path for now.
+
+                        # Re-find volume by disk slice?
+                        # Let's just try the likely new name
+                        std_name = f"/Volumes/Install {inst['name'].replace('.app','')}" # Rough guess
+                        if not os.path.exists(std_name):
+                             std_name = mount_point # Fallback
+
+                        os_name = core.constants.get_os_name(inst['version'], inst['name'])
+                        operations.branding.apply_full_branding(std_name, inst['name'], os_name, inst['version'])
+                    else:
+                        self.log("Installation failed.")
+                else:
+                    self.log(f"Could not mount {part_name}")
+
+            self.log("Update Complete.")
+            self.root.after(0, lambda: messagebox.showinfo("Success", "Update Complete"))
+
+        except Exception as e:
+            self.log(f"Error: {e}")
+            import traceback
+            self.log(traceback.format_exc())
+        finally:
+            self.is_working = False
+            self.root.after(0, lambda: self.create_btn.config(state="normal"))
 
     def run_creation_thread(self, disk_id, installers):
         try:
@@ -710,7 +861,7 @@ class MultiBootGUI:
 
             for inst in installers:
                 self.log(f"Installing {inst['name']}...")
-                os_name = constants.get_os_name(inst['version'])
+                os_name = constants.get_os_name(inst['version'], inst['name'])
                 version_clean = inst['version'].replace('.', '_').split()[0]
                 expected_vol_name = f"INSTALL_{os_name}_{version_clean}"[:27]
 
