@@ -56,10 +56,6 @@ def get_local_installers_map():
     for inst in local_installers:
         ver = inst.get('version')
         if ver:
-            # We don't easily get BUILD number from scan_for_installers unless we parse plist deeper.
-            # But we have version. Let's just track versions for now.
-            # To be precise, we need Build. installer_scanner extracts CFBundleShortVersionString.
-            # Let's try to add build to scanner if possible, or just stick to version match.
             installed_map[ver] = True
 
     return installed_map
@@ -67,13 +63,6 @@ def get_local_installers_map():
 def list_installers(search_term=None):
     """
     List available installers from Mist with enriched metadata.
-
-    Args:
-        search_term: Optional string to filter (e.g. "Sonoma")
-
-    Returns:
-        list: List of dicts with keys:
-              identifier, name, version, build, size, date, compatible, downloaded, latest
     """
     if not check_mist_available():
         return []
@@ -91,28 +80,14 @@ def list_installers(search_term=None):
         if not data:
             return []
 
-        # Get local versions to flag downloaded ones
-        # Since we only have version from scanner (usually), we match on version.
         local_map = get_local_installers_map()
-
-        # Process and mark "Latest"
-        # Mist usually returns sorted list?
-        # Actually Mist returns newest first typically.
-        # Let's group by Major version to find "Latest" for each OS (e.g. Latest Sonoma, Latest Ventura)
-
-        latest_map = {} # Key: Major Version (e.g. "14"), Value: Max Version String
+        latest_map = {}
 
         # First pass: Identify latest versions
         for item in data:
             ver = item.get('version', '0.0')
             major = ver.split('.')[0]
 
-            # Simple string compare is flawed for 14.10 vs 14.9, but mist usually sorts well.
-            # Let's trust Mist's order? Mist output:
-            # 14.6.1
-            # 14.6
-            # ...
-            # So the first one we see for a Major is the latest?
             if major not in latest_map:
                 latest_map[major] = ver
                 item['latest'] = True
@@ -150,8 +125,15 @@ def download_installer_by_identifier(identifier, name_for_log="Installer"):
         '--output-directory', '/Applications'
     ]
 
+    print(f"DEBUG: Running command: {' '.join(cmd)}")
+
     result = subprocess.run(cmd)
-    return result.returncode == 0
+
+    if result.returncode != 0:
+        print(f"❌ Mist download failed for ID {identifier}.")
+        return False
+
+    return True
 
 def download_installer(os_names, version=None):
     """
@@ -165,13 +147,12 @@ def download_installer(os_names, version=None):
 
     success = True
     for name in os_names:
-        # If version is specified, try to find the specific identifier first?
-        # Or just pass to mist and let it decide (default behavior)
         cmd = ['mist', 'download', 'installer', name, 'application', '--force', '--output-directory', '/Applications']
         if version:
             cmd += ['--version', version]
 
         print(f"Downloading {name}...")
+        print(f"DEBUG: Running command: {' '.join(cmd)}")
         if subprocess.run(cmd).returncode != 0:
             success = False
 
