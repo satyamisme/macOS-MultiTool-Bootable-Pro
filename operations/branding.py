@@ -36,9 +36,6 @@ def extract_icon_from_installer(installer_path, installer_name):
         )
 
     if not os.path.exists(icon_source):
-        # Some older installers use different names or path
-        # Try finding any .icns in Resources?
-        # But for now, just log warning
         print(f"  ⚠️  No icon found in installer: {installer_name}")
         return None
 
@@ -65,13 +62,6 @@ def extract_icon_from_installer(installer_path, installer_name):
 def apply_icon_to_volume(volume_path, installer_name):
     """
     Apply cached icon to volume AFTER createinstallmedia.
-
-    Args:
-        volume_path: Mount point of volume
-        installer_name: Name used during extraction
-
-    Returns:
-        bool: True if successful
     """
     cached_icon = _icon_cache.get(installer_name)
 
@@ -112,8 +102,6 @@ def apply_icon_to_volume(volume_path, installer_name):
 def rename_volume(volume_path, new_name):
     """
     Rename the volume to something cleaner.
-    createinstallmedia often names it "Install macOS Sonoma", which is okay,
-    but sometimes we want "macOS Sonoma" or shorter.
     """
     try:
         cmd = ['diskutil', 'rename', volume_path, new_name]
@@ -123,50 +111,55 @@ def rename_volume(volume_path, new_name):
         print(f"  ⚠️  Could not rename volume: {e}")
         return False
 
+def find_bless_folder(volume_path):
+    """
+    Locate the folder containing boot.efi or SystemVersion.plist to bless.
+    """
+    # Standard paths (Newer macOS / Standard Structure)
+    candidates = [
+        os.path.join(volume_path, "System/Library/CoreServices"),
+        os.path.join(volume_path, "Library/CoreServices"),
+        os.path.join(volume_path, ".IABootFiles"), # Sometimes hidden
+        volume_path # Root fallback?
+    ]
+
+    for path in candidates:
+        if os.path.exists(os.path.join(path, "boot.efi")):
+            return path
+
+    # Deep search if standard paths fail (e.g. High Sierra oddity)
+    # createinstallmedia for High Sierra puts files at root but sometimes structure varies.
+    try:
+        # Use find to locate boot.efi (limit depth to avoid huge search)
+        cmd = ['find', volume_path, '-name', 'boot.efi', '-maxdepth', '4']
+        output = subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True).strip()
+        if output:
+            return os.path.dirname(output.split('\n')[0])
+    except:
+        pass
+
+    return None
+
 def bless_volume(volume_path, os_name, version):
     """
     Bless volume for boot and set label.
-
-    Args:
-        volume_path: Mount point of volume
-        os_name: macOS name (e.g., "Sonoma")
-        version: Version string (e.g., "14.6.1")
-
-    Returns:
-        bool: True if successful
     """
-    # Find System folder
-    # On newer macOS installers, it might be in /System/Library/CoreServices
-    # or just /Library/CoreServices depending on structure.
-    # Standard path:
-    system_folder = os.path.join(
-        volume_path,
-        "System/Library/CoreServices"
-    )
+    bless_folder = find_bless_folder(volume_path)
 
-    if not os.path.exists(system_folder):
-        # Fallback for some older structures?
-        system_folder = os.path.join(volume_path, "Library/CoreServices")
-
-    if not os.path.exists(system_folder):
-        print(f"  ⚠️  System folder not found at {system_folder}")
+    if not bless_folder:
+        print(f"  ⚠️  Could not find bootable folder (CoreServices) in {volume_path}")
         return False
 
     # Create a clean label
-    # e.g., "macOS Sonoma 14.6"
-    # Removing "Install" prefix if present in os_name to be sure
     clean_os_name = os_name.replace("Install ", "").replace("macOS ", "")
-
-    # Limit version to major.minor if patch is 0?
-    # Or just use the string passed.
     label = f"macOS {clean_os_name} {version}"
 
     try:
-        # Bless the system folder
+        # Bless the folder
         subprocess.run(
             [
                 'sudo', 'bless',
-                '--folder', system_folder,
+                '--folder', bless_folder,
                 '--label', label
             ],
             check=True,
@@ -182,16 +175,8 @@ def bless_volume(volume_path, os_name, version):
 def apply_full_branding(volume_path, installer_name, os_name, version):
     """
     Apply both icon and blessing to volume.
-
-    This should be called AFTER createinstallmedia completes.
     """
     print(f"  Applying branding...")
-
-    # 1. Rename Volume (Optional, but cleaner)
-    # "Install macOS Sonoma" -> "Sonoma 14.6" ?
-    # Actually, Finder name should probably match the official installer name to avoid confusion,
-    # but the Boot Label (bless) is what appears in Option-Boot menu.
-    # Let's keep Volume Name standard, but Bless Label clean.
 
     icon_ok = apply_icon_to_volume(volume_path, installer_name)
     bless_ok = bless_volume(volume_path, os_name, version)
