@@ -106,14 +106,14 @@ class MultiBootGUI:
 
         # Existing Content Panel (Visible in Update Mode)
         self.content_frame = ttk.LabelFrame(top_frame, text="Existing Drive Content")
-        # Initially hidden
+        # Initially hidden, packed in on_mode_change if update
 
-        cols = ("Partition", "Size", "Action")
+        cols = ("Partition", "Size", "Latest Version", "Action")
         self.content_tree = ttk.Treeview(self.content_frame, columns=cols, show="headings", height=5)
         for col in cols:
             self.content_tree.heading(col, text=col)
             self.content_tree.column(col, width=100)
-        self.content_tree.column("Partition", width=250)
+        self.content_tree.column("Partition", width=200)
         self.content_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
 
         # Content Actions
@@ -126,6 +126,7 @@ class MultiBootGUI:
         inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers (To Add/Update)")
         inst_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
+        # Treeview for installers with Checkbox column
         cols = ("Select", "Name", "Version", "Size", "Buffer", "Status")
         self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=10)
 
@@ -313,10 +314,21 @@ class MultiBootGUI:
             self.content_tree.delete(item)
 
         existing = structure.get('existing_partitions', [])
+
+        # We want to check for updates.
+        # This requires checking Mist for latest versions of these OSes.
+        # But we don't have exact OS name/version from partition easily unless mounted.
+        # 'clean_name' helps.
+
         for part in existing:
             size_gb = part['size'] / 1e9
+            name = part['clean_name']
+
+            # Placeholder for latest version check (would need async Mist call)
+            latest = "Check Mist"
+
             # Tag the item with partition ID for deletion
-            self.content_tree.insert("", "end", values=(part['name'], f"{size_gb:.1f} GB", "Keep"), tags=(part['id'],))
+            self.content_tree.insert("", "end", values=(part['name'], f"{size_gb:.1f} GB", latest, "Keep"), tags=(part['id'],))
 
     def delete_existing_partition(self):
         sel = self.content_tree.selection()
@@ -385,10 +397,6 @@ class MultiBootGUI:
 
             part_size_mb = constants.calculate_partition_size(size_kb, version, override_buffer_gb=buffer_gb)
 
-            # If replacing an existing partition, net change is (New Size - Old Size).
-            # But visuals are simpler if we just show the NEW layout intent.
-            # If we match, we should maybe color code the replacement?
-
             total_required_mb += part_size_mb
             segments.append({"name": name, "size": part_size_mb, "color": "#4a90e2"})
 
@@ -404,8 +412,6 @@ class MultiBootGUI:
                 if is_update and self.drive_structure:
                     # In update mode, available is Free Space?
                     free_gb = self.drive_structure['free_space'] / 1e9
-                    # If we are deleting/replacing, we reclaim space.
-                    # Simplification: Show Free Space as Green bar.
                     available_gb = free_gb
                 else:
                     size_part = disk_str.split(' - ')[1]
@@ -428,15 +434,29 @@ class MultiBootGUI:
 
         color = "black"
         status_text = "Ready"
+
+        # Fit Check
+        # Update mode logic: New items vs Free Space
+        # Note: If replacing, we reclaim space, but simplistic check compares Total New vs Free.
+        # This is a limitation. Advanced check would see if (New - Replaced) < Free.
+        # Current logic is safe (conservative).
+
         if self.total_required_gb > 0:
             if available_gb > 0:
                 if self.total_required_gb > available_gb and not is_update:
                     color = "red"
                     status_text = "❌ Space Insufficient!"
                     self.create_btn.config(state="disabled")
+                elif is_update and self.total_required_gb > available_gb:
+                     # Warn but allow if user intends to replace?
+                     # Ideally we subtract replaced size.
+                     # For now, let's allow but warn.
+                     color = "orange"
+                     status_text = "⚠️ Check Space (Replacing?)"
+                     if not self.is_working: self.create_btn.config(state="normal")
                 else:
                     color = "green"
-                    status_text = "✅ Fits on Disk"
+                    status_text = "✅ Fits"
                     if not self.is_working: self.create_btn.config(state="normal")
             else:
                 status_text = "Select a Disk"
@@ -444,7 +464,7 @@ class MultiBootGUI:
             status_text = "Select Installers"
 
         self.space_label.config(
-            text=f"Required: {self.total_required_gb:.2f} GB | Capacity: {available_gb:.2f} GB | {status_text}",
+            text=f"Required: {self.total_required_gb:.2f} GB | Available: {available_gb:.2f} GB | {status_text}",
             foreground=color
         )
         self.draw_viz(segments, available_gb * 1024 if is_update else available_gb * 1024)
@@ -456,7 +476,16 @@ class MultiBootGUI:
         h = self.viz_canvas.winfo_height()
         if w < 10: w = 900
         current_x = 0
-        scale = w / total_capacity_mb
+
+        # Scale based on total visual width
+        # In Update mode, total capacity is questionable.
+        # Segments might exceed 'Free Space' if we show existing + new.
+        # Let's normalize to sum of segments if > available?
+
+        total_seg_size = sum(s['size'] for s in segments)
+        render_max = max(total_capacity_mb, total_seg_size)
+        scale = w / render_max if render_max > 0 else 1
+
         for seg in segments:
             width = seg["size"] * scale
             self.viz_canvas.create_rectangle(current_x, 0, current_x + width, h, fill=seg["color"], outline="white")
@@ -629,13 +658,27 @@ class MultiBootGUI:
         try:
             for identifier, name in items:
                 self.log(f"Downloading {name}...")
+                success = False
                 if identifier:
                     if mist_downloader.download_installer_by_identifier(identifier, name):
-                         self.log(f"Download of {name} complete.")
+                         success = True
+
+                if not success:
+                    self.log(f"ID download failed/missing, retrying with name '{name}'...")
+                    if mist_downloader.download_installer([name]):
+                        success = True
                     else:
-                         self.log(f"Download of {name} failed.")
+                        # Try simplified name (e.g. "OS X El Capitan" -> "El Capitan")
+                        simple_name = name.replace("OS X ", "").replace("macOS ", "").replace("Mac ", "")
+                        self.log(f"Retrying with simplified name '{simple_name}'...")
+                        if mist_downloader.download_installer([simple_name]):
+                            success = True
+
+                if success:
+                    self.log(f"Download of {name} complete.")
                 else:
-                    mist_downloader.download_installer([name])
+                    self.log(f"Download of {name} failed.")
+
             self.root.after(0, self.scan_installers)
         except Exception as e:
             self.log(f"Download error: {e}")
