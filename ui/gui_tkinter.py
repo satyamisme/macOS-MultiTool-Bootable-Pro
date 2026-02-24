@@ -746,6 +746,14 @@ class MultiBootGUI:
                 else:
                     self.log(f"Could not mount {part_name}")
 
+            # Finalize: Restore data partition if possible
+            if structure['free_space'] > 2e9: # Check initial free space or re-scan?
+                # Re-scan to be safe
+                structure_new = operations.updater.get_drive_structure(disk_id)
+                if structure_new and structure_new['free_space'] > 2e9:
+                    self.log("Restoring unused space to DATA_STORE...")
+                    operations.updater.restore_data_partition(disk_id)
+
             self.log("Update Complete.")
             self.root.after(0, lambda: messagebox.showinfo("Success", "Update Complete"))
 
