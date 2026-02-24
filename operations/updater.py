@@ -17,15 +17,17 @@ def get_drive_structure(disk_id):
 
     Returns:
         dict: {
-            'data_partition': {'id': 'disk2sX', 'size': 12345}, # or None
-            'existing_installers': {'High Sierra': 'disk2s2', ...}, # Map Name -> ID
+            'data_partition': {'id': 'disk2sX', 'size': 12345},
+            'existing_installers': {'High Sierra': 'disk2s2', ...},
+            'existing_partitions': [ {'name': 'High Sierra', 'id': 'disk2s2', 'size': 12345, 'version': 'Unknown'} ],
             'disk_size': 64000000000,
             'free_space': 0
         }
     """
     info = {
         'data_partition': None,
-        'existing_installers': {}, # Changed from list to dict for easier lookup
+        'existing_installers': {},
+        'existing_partitions': [], # Detailed list for GUI
         'disk_size': 0,
         'free_space': 0
     }
@@ -52,13 +54,22 @@ def get_drive_structure(disk_id):
                             'size': part_size
                         }
                     elif 'Install macOS' in vol_name or 'INSTALL_' in vol_name or 'macOS' in vol_name:
-                        # Try to normalize name to OS name only?
-                        # e.g., "Install macOS High Sierra" -> "High Sierra"
-                        # Or just store full name map
                         clean_name = vol_name.replace("Install macOS ", "").replace("INSTALL_", "").replace("macOS ", "")
+
                         # Store flexible keys
                         info['existing_installers'][clean_name] = part_id
-                        info['existing_installers'][vol_name] = part_id # Store exact too
+                        info['existing_installers'][vol_name] = part_id
+
+                        # Add to detail list
+                        # Try to detect version?
+                        # `diskutil info` might show more, or we mount and check.
+                        # For speed, we just list name.
+                        info['existing_partitions'].append({
+                            'name': vol_name,
+                            'clean_name': clean_name,
+                            'id': part_id,
+                            'size': part_size
+                        })
 
                 info['free_space'] = info['disk_size'] - used_size
 
@@ -156,13 +167,6 @@ def add_partition_to_free_space(disk_id, new_installers):
 def replace_existing_partition(part_id, installer):
     """
     Reformat an existing partition to update it.
-
-    Args:
-        part_id: The partition identifier (e.g., "disk2s2")
-        installer: Installer metadata
-
-    Returns:
-        dict: {'name': new_name, 'installer': installer} or None
     """
     os_name = constants.get_os_name(installer['version'], installer.get('name'))
     version_clean = installer['version'].replace('.', '_').split()[0]
@@ -171,12 +175,6 @@ def replace_existing_partition(part_id, installer):
     print(f"  Reformatting {part_id} as {part_name}...")
 
     try:
-        # Check size constraints?
-        # Ideally we check if existing partition is big enough.
-        # But eraseVolume just uses existing size.
-        # If new installer is bigger than old partition + buffer, install might fail later.
-        # Warn user in GUI? For now assume user knows or space is sufficient (installers usually similiar size)
-
         cmd = ['sudo', 'diskutil', 'eraseVolume', 'JHFS+', part_name, part_id]
         subprocess.check_output(cmd, text=True)
         print("  ✓ Reformat successful")
@@ -185,6 +183,22 @@ def replace_existing_partition(part_id, installer):
     except subprocess.CalledProcessError as e:
         print(f"  ❌ Failed to reformat partition: {e}")
         return None
+
+def delete_partition(part_id):
+    """
+    Delete a partition (turn it into Free Space).
+    Uses 'eraseVolume FREE ...'
+    """
+    print(f"  Deleting partition {part_id}...")
+    try:
+        # diskutil eraseVolume FREE "Free Space" disk3s2
+        cmd = ['sudo', 'diskutil', 'eraseVolume', 'FREE', 'Free Space', part_id]
+        subprocess.check_output(cmd, text=True)
+        print("  ✓ Deletion successful")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"  ❌ Failed to delete partition: {e}")
+        return False
 
 def restore_data_partition(disk_id):
     try:

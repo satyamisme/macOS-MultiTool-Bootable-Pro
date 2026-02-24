@@ -38,10 +38,11 @@ class MultiBootGUI:
         self.total_required_gb = 0.0
         self.custom_buffers = {}
         self.existing_installers_map = {} # Store existing content
+        self.drive_structure = None # Detailed structure
 
         # UI State
         self.show_all_disks_var = tk.BooleanVar(value=False)
-        self.update_mode_var = tk.BooleanVar(value=False)
+        self.mode_var = tk.StringVar(value="create") # "create" or "update"
 
         # Layout
         self.create_widgets()
@@ -90,7 +91,7 @@ class MultiBootGUI:
         self.disk_combo.pack(fill="x", padx=10, pady=10)
         self.disk_combo.bind("<<ComboboxSelected>>", self.on_disk_selected)
 
-        # Options Frame
+        # Options Frame (Mode Switch)
         opt_frame = ttk.Frame(disk_frame)
         opt_frame.pack(fill="x", padx=10, pady=5)
 
@@ -98,13 +99,31 @@ class MultiBootGUI:
                         variable=self.show_all_disks_var,
                         command=self.refresh_hardware).pack(side="left")
 
-        self.update_mode_chk = ttk.Checkbutton(opt_frame, text="Update Existing Drive (Add/Replace)",
-                        variable=self.update_mode_var,
-                        command=self.on_mode_change)
-        self.update_mode_chk.pack(side="left", padx=20)
+        # Mode Selection Radiobuttons
+        ttk.Label(opt_frame, text="Mode:").pack(side="left", padx=(20, 5))
+        ttk.Radiobutton(opt_frame, text="Create New (Erase)", variable=self.mode_var, value="create", command=self.on_mode_change).pack(side="left", padx=5)
+        ttk.Radiobutton(opt_frame, text="Update Existing", variable=self.mode_var, value="update", command=self.on_mode_change).pack(side="left", padx=5)
+
+        # Existing Content Panel (Visible in Update Mode)
+        self.content_frame = ttk.LabelFrame(top_frame, text="Existing Drive Content")
+        # Initially hidden
+
+        cols = ("Partition", "Size", "Action")
+        self.content_tree = ttk.Treeview(self.content_frame, columns=cols, show="headings", height=5)
+        for col in cols:
+            self.content_tree.heading(col, text=col)
+            self.content_tree.column(col, width=100)
+        self.content_tree.column("Partition", width=250)
+        self.content_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
+
+        # Content Actions
+        cbtn_frame = ttk.Frame(self.content_frame)
+        cbtn_frame.pack(side="right", fill="y", padx=5, pady=5)
+        ttk.Button(cbtn_frame, text="Delete Partition", command=self.delete_existing_partition).pack(fill="x", pady=2)
+        ttk.Button(cbtn_frame, text="Scan Content", command=lambda: self.on_disk_selected(None)).pack(fill="x", pady=2)
 
         # Middle: Installer Selection
-        inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers")
+        inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers (To Add/Update)")
         inst_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
         cols = ("Select", "Name", "Version", "Size", "Buffer", "Status")
@@ -196,11 +215,14 @@ class MultiBootGUI:
         messagebox.showinfo("Optimized", "Buffers set to minimum (0.2 GB) for maximum density.")
 
     def on_mode_change(self):
-        is_update = self.update_mode_var.get()
-        if is_update:
-            self.create_btn.config(text="UPDATE EXISTING USB (Add/Replace)")
+        mode = self.mode_var.get()
+        if mode == "update":
+            self.create_btn.config(text="UPDATE EXISTING USB")
+            self.content_frame.pack(fill="both", expand=True, padx=5, pady=5, after=self.disk_combo.master)
+            self.on_disk_selected(None)
         else:
             self.create_btn.config(text="CREATE BOOTABLE USB (Erase All)")
+            self.content_frame.pack_forget()
         self.update_space_usage()
 
     def on_tree_click(self, event):
@@ -274,19 +296,54 @@ class MultiBootGUI:
         if not disk_str or "No external" in disk_str: return
         try:
             disk_id = disk_str.split('(')[1].split(')')[0]
-            # Analyze drive in background for visual feedback
             threading.Thread(target=self.scan_drive_content, args=(disk_id,)).start()
         except: pass
         self.update_space_usage()
 
     def scan_drive_content(self, disk_id):
-        # Helper to update existing content map
         structure = updater.get_drive_structure(disk_id)
         if structure:
             self.existing_installers_map = structure.get('existing_installers', {})
-            # We could trigger a redraw or update status here
-            # But main thread update is safer
+            self.drive_structure = structure # Store full structure
+            self.root.after(0, lambda: self.update_content_ui(structure))
             self.root.after(0, self.update_space_usage)
+
+    def update_content_ui(self, structure):
+        for item in self.content_tree.get_children():
+            self.content_tree.delete(item)
+
+        existing = structure.get('existing_partitions', [])
+        for part in existing:
+            size_gb = part['size'] / 1e9
+            # Tag the item with partition ID for deletion
+            self.content_tree.insert("", "end", values=(part['name'], f"{size_gb:.1f} GB", "Keep"), tags=(part['id'],))
+
+    def delete_existing_partition(self):
+        sel = self.content_tree.selection()
+        if not sel: return
+
+        item = sel[0]
+        values = self.content_tree.item(item)['values']
+        part_name = values[0]
+        part_id = self.content_tree.item(item, 'tags')[0]
+
+        if messagebox.askyesno("Delete Partition", f"Delete {part_name} ({part_id})?\n\nThis frees up space immediately."):
+            threading.Thread(target=self.run_delete_partition, args=(part_id,)).start()
+
+    def run_delete_partition(self, part_id):
+        self.log(f"Deleting {part_id}...")
+        try:
+            if updater.delete_partition(part_id):
+                self.log("Deleted. Rescanning...")
+                # Rescan logic
+                disk_str = self.selected_disk.get()
+                if disk_str:
+                    disk_id = disk_str.split('(')[1].split(')')[0]
+                    self.scan_drive_content(disk_id)
+            else:
+                self.log("Delete failed.")
+        except Exception as e:
+            self.log(f"Error: {e}")
 
     def get_selected_installers(self):
         selected = []
@@ -297,7 +354,7 @@ class MultiBootGUI:
 
     def update_space_usage(self, event=None):
         selected_items = self.get_selected_installers()
-        is_update = self.update_mode_var.get()
+        is_update = self.mode_var.get() == "update"
 
         total_required_mb = 0.0
         if not is_update:
@@ -307,13 +364,11 @@ class MultiBootGUI:
         if not is_update:
             segments.append({"name": "EFI", "size": 1024, "color": "gray"})
 
-        # Add existing content segments if in Update Mode
-        if is_update and self.existing_installers_map:
-            # We don't know exact sizes from just the map keys easily without full struct
-            # But let's just visually indicate "Existing" as blocked space?
-            # Or assume Available Space calc handles it.
-            # `current_disk_size_gb` logic needs to account for this.
-            pass
+        # Visualize existing content if Update Mode
+        if is_update and self.drive_structure:
+            for part in self.drive_structure.get('existing_partitions', []):
+                size_mb = part['size'] / 1e6
+                segments.append({"name": part['name'], "size": size_mb, "color": "#ccc"})
 
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
@@ -330,10 +385,9 @@ class MultiBootGUI:
 
             part_size_mb = constants.calculate_partition_size(size_kb, version, override_buffer_gb=buffer_gb)
 
-            # If updating and replacing, we shouldn't add to total required if reuse?
-            # Logic: If replacing, we consume existing partition space.
-            # But visualizing that is complex.
-            # Let's keep "Required" as what the NEW payload needs.
+            # If replacing an existing partition, net change is (New Size - Old Size).
+            # But visuals are simpler if we just show the NEW layout intent.
+            # If we match, we should maybe color code the replacement?
 
             total_required_mb += part_size_mb
             segments.append({"name": name, "size": part_size_mb, "color": "#4a90e2"})
@@ -347,40 +401,42 @@ class MultiBootGUI:
         if disk_str and "No external" not in disk_str:
             try:
                 disk_id = disk_str.split('(')[1].split(')')[0]
-                # Default: Total capacity
-                size_part = disk_str.split(' - ')[1]
-                total_cap_gb = float(size_part.split()[0])
-                available_gb = total_cap_gb
-
-                # If update mode, available is Free Space?
-                # We need the `free_space` from structure scan.
-                # scan_drive_content might have run.
-                # But we can't easily access the result unless we store it.
-                # We stored `existing_installers_map` but not free space.
-                # Let's rely on visual indication for now.
-
+                if is_update and self.drive_structure:
+                    # In update mode, available is Free Space?
+                    free_gb = self.drive_structure['free_space'] / 1e9
+                    # If we are deleting/replacing, we reclaim space.
+                    # Simplification: Show Free Space as Green bar.
+                    available_gb = free_gb
+                else:
+                    size_part = disk_str.split(' - ')[1]
+                    available_gb = float(size_part.split()[0])
             except:
                 available_gb = 0.0
         self.current_disk_size_gb = available_gb
 
-        available_mb = available_gb * 1024
-        if available_mb > total_required_mb:
-            rem_mb = available_mb - total_required_mb
-            if not is_update:
+        # Draw Free Space Segment
+        if is_update:
+             # Just append a "Free" block at end
+             free_mb = available_gb * 1024
+             segments.append({"name": "Free", "size": free_mb, "color": "#50e3c2"})
+        else:
+             # Create mode logic
+             available_mb = available_gb * 1024
+             if available_mb > total_required_mb:
+                rem_mb = available_mb - total_required_mb
                 segments.append({"name": "Free/Data", "size": rem_mb, "color": "#50e3c2"})
 
         color = "black"
         status_text = "Ready"
         if self.total_required_gb > 0:
             if available_gb > 0:
-                # In update mode, simple comparison is tricky.
                 if self.total_required_gb > available_gb and not is_update:
                     color = "red"
                     status_text = "❌ Space Insufficient!"
                     self.create_btn.config(state="disabled")
                 else:
                     color = "green"
-                    status_text = "✅ Fits on Disk" # Simplified
+                    status_text = "✅ Fits on Disk"
                     if not self.is_working: self.create_btn.config(state="normal")
             else:
                 status_text = "Select a Disk"
@@ -391,7 +447,7 @@ class MultiBootGUI:
             text=f"Required: {self.total_required_gb:.2f} GB | Capacity: {available_gb:.2f} GB | {status_text}",
             foreground=color
         )
-        self.draw_viz(segments, available_mb)
+        self.draw_viz(segments, available_gb * 1024 if is_update else available_gb * 1024)
 
     def draw_viz(self, segments, total_capacity_mb):
         self.viz_canvas.delete("all")
@@ -406,7 +462,6 @@ class MultiBootGUI:
             self.viz_canvas.create_rectangle(current_x, 0, current_x + width, h, fill=seg["color"], outline="white")
             if width > 40:
                 name_short = seg['name'][:10]
-                if seg['name'] == "Free/Data": name_short = "Free"
                 self.viz_canvas.create_text(current_x + width/2, h/2, text=name_short, fill="black", font=("Arial", 8))
             current_x += width
 
@@ -422,8 +477,6 @@ class MultiBootGUI:
                 self.disk_combo['values'] = options
                 if options: self.disk_combo.current(0)
                 self.log(f"Found {len(drives)} drives.")
-
-                # Trigger content scan for the default selected drive
                 self.on_disk_selected(None)
             else:
                 self.disk_combo['values'] = ["No external USB drives found"]
@@ -656,64 +709,37 @@ class MultiBootGUI:
                 self.log("Failed to analyze drive.")
                 return
 
-            # Smart Update Logic
-            actions = [] # List of {'type': 'add'|'replace', 'installer': ..., 'target': ...}
-
-            # Check existing content
+            actions = []
             existing_map = structure.get('existing_installers', {})
 
             for inst in installers:
-                # Check if this OS Name exists on disk
-                # Name matching is fuzzy. Use constants.get_os_name to normalize.
                 new_os_name = core.constants.get_os_name(inst['version'], inst['name'])
-
-                # Check keys in existing_map (which has both "Install macOS High Sierra" and "High Sierra")
-                # We need to be careful not to match "Sierra" with "High Sierra"
-
                 match_id = None
-
-                # Exact match first?
-                # The existing map has "High Sierra" -> "disk3s2"
                 if new_os_name in existing_map:
                     match_id = existing_map[new_os_name]
                 else:
-                    # Try scanning keys
                     for key, pid in existing_map.items():
-                        if new_os_name in key: # e.g. "High Sierra" in "Install macOS High Sierra"
+                        if new_os_name in key:
                             match_id = pid
                             break
-
                 if match_id:
-                    # Found existing. Ask to replace?
-                    # We can't ask in thread easily (blocking UI).
-                    # Logic: If user selected it for Update, they imply replacing/updating it?
-                    # Or adding duplicate? Replacing is cleaner.
-                    # Let's assume replace if name matches.
                     self.log(f"Found existing {new_os_name} at {match_id}. Will replace.")
                     actions.append({'type': 'replace', 'installer': inst, 'target': match_id})
                 else:
                     self.log(f"{new_os_name} not found. Will add to free space.")
                     actions.append({'type': 'add', 'installer': inst})
 
-            # Execute Actions
             for action in actions:
                 inst = action['installer']
-
                 if action['type'] == 'replace':
                     target = action['target']
                     res = operations.updater.replace_existing_partition(target, inst)
                     if res:
-                        # Continue to install
                         part_name = res['name']
                     else:
                         self.log(f"Failed to prepare partition for {inst['name']}")
                         continue
-
                 elif action['type'] == 'add':
-                    # Batch additions? `add_partition_to_free_space` takes list.
-                    # Currently we do one by one here.
-                    # Let's call the batch function for all 'adds' at once?
-                    # No, let's keep it simple.
                     res_list = operations.updater.add_partition_to_free_space(disk_id, [inst])
                     if res_list:
                         part_name = res_list[0]['name']
@@ -721,24 +747,18 @@ class MultiBootGUI:
                         self.log(f"Failed to add partition for {inst['name']}")
                         continue
 
-                # Common Install Logic
                 self.log(f"Installing {inst['name']} to {part_name}...")
                 subprocess.run(['diskutil', 'mount', part_name])
                 mount_point = f"/Volumes/{part_name}"
-
-                if not os.path.exists(mount_point):
-                    time.sleep(3)
+                if not os.path.exists(mount_point): time.sleep(3)
 
                 if os.path.exists(mount_point):
                     def cb(p):
                         if p%10==0: self.log(f"  {inst['name']}: {p}%")
-
                     if operations.installer_runner.run_createinstallmedia(inst['path'], mount_point, progress_callback=cb):
                         self.log("Success.")
-                        # Branding logic
                         std_name = f"/Volumes/Install {inst['name'].replace('.app','')}"
                         if not os.path.exists(std_name): std_name = mount_point
-
                         os_name = core.constants.get_os_name(inst['version'], inst['name'])
                         operations.branding.apply_full_branding(std_name, inst['name'], os_name, inst['version'])
                     else:
@@ -746,9 +766,7 @@ class MultiBootGUI:
                 else:
                     self.log(f"Could not mount {part_name}")
 
-            # Finalize: Restore data partition if possible
-            if structure['free_space'] > 2e9: # Check initial free space or re-scan?
-                # Re-scan to be safe
+            if structure['free_space'] > 2e9:
                 structure_new = operations.updater.get_drive_structure(disk_id)
                 if structure_new and structure_new['free_space'] > 2e9:
                     self.log("Restoring unused space to DATA_STORE...")
