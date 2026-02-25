@@ -131,10 +131,11 @@ class MultiBootGUI:
                         variable=self.show_all_disks_var,
                         command=self.refresh_hardware).pack(side="left")
 
-        # Mode Selection Radiobuttons
-        ttk.Label(opt_frame, text="Mode:").pack(side="left", padx=(20, 5))
-        ttk.Radiobutton(opt_frame, text="Create New (Erase)", variable=self.mode_var, value="create", command=self.on_mode_change).pack(side="left", padx=5)
-        ttk.Radiobutton(opt_frame, text="Update Existing", variable=self.mode_var, value="update", command=self.on_mode_change).pack(side="left", padx=5)
+        # Mode Selection (Auto-Detected)
+        self.mode_label = ttk.Label(opt_frame, text="Mode: Select Disk", font=("Arial", 10, "bold"))
+        self.mode_label.pack(side="left", padx=(20, 5))
+
+        ttk.Button(opt_frame, text="Change...", width=8, command=self.manual_mode_change).pack(side="left", padx=5)
 
         # Existing Content Panel (Visible in Update Mode)
         self.content_frame = ttk.LabelFrame(top_frame, text="Existing Drive Content")
@@ -159,21 +160,41 @@ class MultiBootGUI:
         inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers (To Add/Update)")
         inst_frame.pack(fill="both", expand=True, padx=5, pady=5)
 
-        cols = ("Select", "Name", "Version", "Size", "Buffer", "Status")
+        # Filter Bar
+        filter_frame = ttk.Frame(inst_frame)
+        filter_frame.pack(fill="x", padx=5, pady=2)
+
+        ttk.Label(filter_frame, text="Show:").pack(side="left", padx=2)
+        self.filter_var = tk.StringVar(value="all")
+        ttk.Radiobutton(filter_frame, text="All", variable=self.filter_var, value="all", command=self.apply_filter).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="Local Only", variable=self.filter_var, value="local", command=self.apply_filter).pack(side="left", padx=2)
+        ttk.Radiobutton(filter_frame, text="Remote Only", variable=self.filter_var, value="remote", command=self.apply_filter).pack(side="left", padx=2)
+
+        ttk.Label(filter_frame, text="Search:").pack(side="left", padx=(20, 2))
+        self.search_var = tk.StringVar()
+        self.search_var.trace("w", lambda *args: self.apply_filter())
+        ttk.Entry(filter_frame, textvariable=self.search_var, width=20).pack(side="left", padx=2)
+
+        # Tree
+        cols = ("Select", "Name", "Version", "Build", "Size", "Buffer", "Source", "Status")
         self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=10)
 
         self.inst_tree.heading("Select", text="[x]")
         self.inst_tree.column("Select", width=40, anchor="center")
         self.inst_tree.heading("Name", text="Name")
-        self.inst_tree.column("Name", width=250)
+        self.inst_tree.column("Name", width=220)
         self.inst_tree.heading("Version", text="Version")
-        self.inst_tree.column("Version", width=80)
+        self.inst_tree.column("Version", width=70)
+        self.inst_tree.heading("Build", text="Build")
+        self.inst_tree.column("Build", width=60)
         self.inst_tree.heading("Size", text="Size")
-        self.inst_tree.column("Size", width=80)
+        self.inst_tree.column("Size", width=70)
         self.inst_tree.heading("Buffer", text="Buffer")
         self.inst_tree.column("Buffer", width=60)
+        self.inst_tree.heading("Source", text="Source")
+        self.inst_tree.column("Source", width=60, anchor="center")
         self.inst_tree.heading("Status", text="Status")
-        self.inst_tree.column("Status", width=80)
+        self.inst_tree.column("Status", width=100)
 
         self.inst_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
         self.inst_tree.bind("<Button-1>", self.on_tree_click)
@@ -186,15 +207,15 @@ class MultiBootGUI:
         self.context_menu = tk.Menu(self.inst_tree, tearoff=0)
         self.context_menu.add_command(label="Edit Buffer Size", command=self.edit_selected_buffer)
         self.context_menu.add_separator()
-        self.context_menu.add_command(label="Delete Installer", command=self.delete_selected_installer)
+        self.context_menu.add_command(label="Delete Local Installer", command=self.delete_selected_installer)
         self.inst_tree.bind("<Button-3>", self.show_context_menu)
 
         btn_frame = ttk.Frame(inst_frame)
         btn_frame.pack(side="bottom", fill="x", padx=5, pady=5)
         ttk.Button(btn_frame, text="Select All", command=self.select_all_installers).pack(side="left", padx=2)
         ttk.Button(btn_frame, text="Unselect All", command=self.deselect_all_installers).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="Delete Selected", command=self.delete_selected_installer).pack(side="left", padx=20)
-        ttk.Button(btn_frame, text="Download New...", command=self.open_download_dialog).pack(side="right", padx=2)
+        ttk.Button(btn_frame, text="Delete Local", command=self.delete_selected_installer).pack(side="left", padx=20)
+        ttk.Button(btn_frame, text="Refresh List", command=self.scan_installers).pack(side="right", padx=2)
 
         # Bottom Section
         bottom_frame = ttk.Frame(paned)
@@ -219,6 +240,16 @@ class MultiBootGUI:
         self.buffer_scale.configure(command=self.on_buffer_change)
 
         ttk.Button(buffer_frame, text="Optimize Density (Smart)", command=self.optimize_buffers).pack(side="right", padx=10)
+
+        # Auto-Download Options
+        dl_frame = ttk.Frame(settings_frame)
+        dl_frame.pack(fill="x", padx=5, pady=2)
+
+        self.auto_dl_var = tk.BooleanVar(value=True)
+        ttk.Checkbutton(dl_frame, text="Auto-download missing installers", variable=self.auto_dl_var, command=self.update_space_usage).pack(side="left", padx=5)
+
+        self.dl_size_label = ttk.Label(dl_frame, text="", foreground="blue")
+        self.dl_size_label.pack(side="left", padx=10)
 
         self.space_label = ttk.Label(settings_frame, text="Required: 0.0 GB | Available: 0.0 GB | Select Installers & Disk", font=("Arial", 10, "bold"))
         self.space_label.pack(fill="x", padx=10, pady=10)
@@ -359,7 +390,12 @@ class MultiBootGUI:
             else: return
         values = self.inst_tree.item(item_id)['values']
         name = values[1]
-        current_buffer = values[4]
+        # Buffer is index 5
+        try:
+            current_buffer = values[5]
+        except IndexError:
+            current_buffer = "2.0 GB"
+
         new_val = simpledialog.askfloat("Buffer Size", f"Enter buffer size (GB) for {name}:",
                                         minvalue=0.1, maxvalue=20.0, initialvalue=float(current_buffer.split()[0]))
         if new_val is not None:
@@ -407,8 +443,31 @@ class MultiBootGUI:
         if structure:
             self.existing_installers_map = structure.get('existing_installers', {})
             self.drive_structure = structure # Store full structure
+
+            # Auto-Detect Mode
+            existing = structure.get('existing_partitions', [])
+            if existing:
+                self.mode_var.set("update")
+                self.root.after(0, lambda: self.mode_label.config(text="Mode: Update Existing (Safe)", foreground="blue"))
+            else:
+                self.mode_var.set("create")
+                self.root.after(0, lambda: self.mode_label.config(text="Mode: Create New (Erase)", foreground="red"))
+
+            self.root.after(0, self.on_mode_change)
             self.root.after(0, lambda: self.update_content_ui(structure))
             self.root.after(0, self.update_space_usage)
+
+    def manual_mode_change(self):
+        curr = self.mode_var.get()
+        if curr == "create":
+            if messagebox.askyesno("Switch Mode", "Switch to Update Mode?\n\nThis will try to preserve existing data."):
+                self.mode_var.set("update")
+                self.mode_label.config(text="Mode: Update Existing (Forced)", foreground="blue")
+        else:
+            if messagebox.askyesno("Switch Mode", "Switch to Create Mode?\n\nWARNING: This will ERASE the entire disk!"):
+                self.mode_var.set("create")
+                self.mode_label.config(text="Mode: Create New (Erase Forced)", foreground="red")
+        self.on_mode_change()
 
     def update_content_ui(self, structure):
         for item in self.content_tree.get_children():
@@ -476,6 +535,7 @@ class MultiBootGUI:
         selected_items = self.get_selected_installers()
         is_update = self.mode_var.get() == "update"
 
+        total_download_kb = 0
         total_required_mb = 0.0
         if not is_update:
             total_required_mb += 1024 # EFI
@@ -513,15 +573,26 @@ class MultiBootGUI:
             values = self.inst_tree.item(item_id)['values']
             name = values[1]
             version = str(values[2])
-            size_kb = 0
-            for inst in self.installers_list:
-                if inst['name'] == name and str(inst['version']) == version:
-                    size_kb = inst['size_kb']
-                    break
 
-            # Check for existing
-            # If replacing, use minimal buffer (or 0 overhead assuming reuse)
-            # Ideally we check drive_structure existing_partitions size vs new size
+            # Use tags for quick lookup of size
+            size_kb = 0
+            tags = self.inst_tree.item(item_id, "tags")
+            if tags and tags[0].isdigit():
+                idx = int(tags[0])
+                if idx < len(self.installers_list):
+                    size_kb = self.installers_list[idx]['size_kb']
+
+            if size_kb == 0:
+                for inst in self.installers_list:
+                    if inst['name'] == name and str(inst['version']) == version:
+                        size_kb = inst['size_kb']
+                        break
+
+            # Check download requirement
+            # If source is remote (via values[6] which is icon, or logic), add to download
+            # values[6] is Source Icon. ☁️ means remote.
+            if "☁️" in values[6]:
+                total_download_kb += size_kb
 
             clean_name = name.replace("Install macOS ", "").replace("Install ", "").replace(".app", "")
             is_replacing = False
@@ -539,7 +610,7 @@ class MultiBootGUI:
                             replaced_seg_index = idx
                             break
 
-            try: buffer_gb = float(values[4].split()[0])
+            try: buffer_gb = float(values[5].split()[0])
             except: buffer_gb = 2.0
 
             installer_size_mb = (size_kb / 1024)
@@ -581,9 +652,11 @@ class MultiBootGUI:
             try:
                 disk_id = disk_str.split('(')[1].split(')')[0]
                 if is_update and self.drive_structure:
-                    # In update mode, available for NEW partitions is just Free Space.
-                    # Replaced partitions are handled by the 'is_replacing' logic above.
+                    # In update mode, available for NEW partitions is just Free Space + DATA_STORE size
                     free_gb = self.drive_structure['free_space'] / 1e9
+                    data_part = self.drive_structure.get('data_partition')
+                    if data_part:
+                        free_gb += data_part['size'] / 1e9
                     available_gb = free_gb
                 else:
                     size_part = disk_str.split(' - ')[1]
@@ -596,7 +669,7 @@ class MultiBootGUI:
         if is_update:
              # Just append a "Free" block at end
              free_mb = available_gb * 1024
-             segments.append({"name": "Free", "size": free_mb, "color": "white", "outline": "#bdc3c7", "type": "free"})
+             segments.append({"name": "Free/Data", "size": free_mb, "color": "white", "outline": "#bdc3c7", "type": "free"})
         else:
              # Create mode logic
              available_mb = available_gb * 1024
@@ -630,7 +703,7 @@ class MultiBootGUI:
                     # 2. Replacements must fit in Existing Partitions
                     # We check the segments we just built for red color
                     for seg in segments:
-                        if seg['color'] == "red":
+                        if seg['color'] == "#e74c3c": # Red
                             can_proceed = False
                             error_msg = f"'{seg['name']}' too large for existing partition!"
                             break
@@ -645,15 +718,28 @@ class MultiBootGUI:
         if not can_proceed:
             color = "red"
             status_text = f"❌ {error_msg}"
-            self.create_btn.config(state="disabled")
+            self.create_btn.config(state="disabled", text="Cannot Proceed")
         else:
             color = "green"
-            if not self.is_working and (len(selected_items) > 0): self.create_btn.config(state="normal")
+            if not self.is_working and (len(selected_items) > 0):
+                self.create_btn.config(state="normal")
+                # Smart Button Text
+                btn_text = "CREATE BOOTABLE USB"
+                if is_update: btn_text = "UPDATE EXISTING USB"
+                if total_download_kb > 0: btn_text = "DOWNLOAD & " + btn_text.split(" ")[0] + " USB"
+                self.create_btn.config(text=btn_text)
 
         self.space_label.config(
             text=f"New Required: {self.total_required_gb:.2f} GB | Free: {available_gb:.2f} GB | {status_text}",
             foreground=color
         )
+
+        if total_download_kb > 0:
+            dl_gb = total_download_kb / (1024*1024)
+            self.dl_size_label.config(text=f"📥 Download Required: {dl_gb:.1f} GB")
+        else:
+            self.dl_size_label.config(text="")
+
         self.draw_viz(segments, available_gb * 1024 if is_update else available_gb * 1024)
 
     def draw_viz(self, segments, total_capacity_mb):
@@ -742,32 +828,143 @@ class MultiBootGUI:
         self.update_space_usage()
 
     def scan_installers(self):
+        self.log("Scanning for installers (Local + Remote)...")
+        # Clear tree
         for item in self.inst_tree.get_children():
             self.inst_tree.delete(item)
-        self.installers_list = installer_scanner.scan_for_installers()
+
+        # Run in thread
+        threading.Thread(target=self._scan_installers_thread).start()
+
+    def _scan_installers_thread(self):
+        # 1. Local Scan
+        local_list = installer_scanner.scan_for_installers()
         import detection.stub_validator
-        default_buffer = self.buffer_var.get()
-        if self.installers_list:
-            for inst in self.installers_list:
-                is_stub = detection.stub_validator.is_stub_installer(inst['path'])
-                inst['is_stub'] = is_stub
-                status = "STUB" if is_stub else inst.get('status', 'FULL')
-                size_gb = inst['size_kb'] / (1024 * 1024)
-                key = f"{inst['name']}_{inst['version']}"
-                buf = self.custom_buffers.get(key, default_buffer)
-                item_id = self.inst_tree.insert("", "end", values=(
-                    "☐", inst['name'], inst['version'], f"{size_gb:.2f} GB", f"{buf:.1f} GB", status
-                ))
-                if is_stub: self.inst_tree.item(item_id, tags=("stub",))
-            self.inst_tree.tag_configure("stub", foreground="gray")
-            self.log(f"Found {len(self.installers_list)} local installer(s).")
-        else:
-            self.log("No local installers found.")
+
+        # Enhance local list
+        for inst in local_list:
+            inst['source'] = 'local'
+            inst['is_stub'] = detection.stub_validator.is_stub_installer(inst['path'])
+            inst['status'] = "STUB" if inst['is_stub'] else "Ready"
+            inst['identifier'] = None # Local ones might not have identifiers easily
+
+        # 2. Remote Scan (Mist)
+        remote_list = []
+        if mist_downloader.check_mist_available():
+            try:
+                remote_list = mist_downloader.list_installers() # Returns list of dicts
+            except Exception as e:
+                self.log(f"Mist error: {e}")
+
+        # 3. Merge Lists
+        # Use (version, build) as key
+        merged_map = {}
+
+        # Add Remote first
+        for r in remote_list:
+            key = (r.get('version'), r.get('build'))
+            r['source'] = 'remote'
+            r['path'] = None
+            r['status'] = "Available"
+            r['size_kb'] = r.get('size', 0) / 1024 # Convert bytes to KB
+            merged_map[key] = r
+
+        # Add Local (overwriting remote if exists, or adding new)
+        for l in local_list:
+            # Try to get build number if possible, or just version
+            # Local scanner might not get build number perfectly.
+            # If we don't have build, we rely on version.
+            # But remote usually has build.
+            # Simple approach: Match by Name + Version
+            matched = False
+            l_clean = l['name'].replace("Install ", "").replace(".app", "")
+            for k, v in merged_map.items():
+                v_clean = v['name'].replace("Install ", "").replace(".app", "")
+                if v['version'] == str(l['version']) and (v['name'] == l['name'] or v_clean == l_clean):
+                    # Update existing remote entry to be local
+                    v['source'] = 'local'
+                    v['path'] = l['path']
+                    v['status'] = "Downloaded"
+                    v['is_stub'] = l['is_stub']
+                    if l['is_stub']: v['status'] = "STUB (Local)"
+                    v['size_kb'] = l['size_kb'] # Use local size
+                    matched = True
+                    break
+
+            if not matched:
+                # Add as local-only
+                key = (l['version'], 'local')
+                merged_map[key] = l
+
+        # Convert back to list and sort
+        final_list = list(merged_map.values())
+        # Sort by version desc
+        try:
+            final_list.sort(key=lambda x: x.get('version', '0'), reverse=True)
+        except: pass
+
+        self.installers_list = final_list
+        self.root.after(0, self.apply_filter)
+        self.root.after(0, lambda: self.log(f"Found {len(final_list)} installers (Local+Remote)."))
+
+    def apply_filter(self):
+        # Clear current view
+        for item in self.inst_tree.get_children():
+            self.inst_tree.delete(item)
+
+        filter_mode = self.filter_var.get()
+        search_term = self.search_var.get().lower()
+
+        count = 0
+        for inst in self.installers_list:
+            # 1. Filter by Mode
+            if filter_mode == "local" and inst['source'] != 'local': continue
+            if filter_mode == "remote" and inst['source'] != 'remote': continue
+
+            # 2. Filter by Search
+            name_ver = f"{inst['name']} {inst['version']}".lower()
+            if search_term and search_term not in name_ver: continue
+
+            # Add to tree
+            size_gb = inst['size_kb'] / (1024 * 1024)
+            source_icon = "💻" if inst['source'] == 'local' else "☁️"
+
+            # Determine buffer
+            default_buffer = self.buffer_var.get()
+            key = f"{inst['name']}_{inst['version']}"
+            buf = self.custom_buffers.get(key, default_buffer)
+
+            values = (
+                "☐",
+                inst['name'],
+                inst['version'],
+                inst.get('build', ''),
+                f"{size_gb:.2f} GB",
+                f"{buf:.1f} GB",
+                source_icon,
+                inst['status']
+            )
+
+            item_id = self.inst_tree.insert("", "end", values=values)
+
+            # Store full data ref
+            # We need to map item_id to index in self.installers_list or store data
+            # Simplest is to rely on values, but source is icon now.
+            # Let's store index in tags
+            self.inst_tree.item(item_id, tags=(str(self.installers_list.index(inst)),))
+
+            if inst.get('is_stub'):
+                self.inst_tree.item(item_id, tags=(str(self.installers_list.index(inst)), "stub"))
+
+            count += 1
+
+        self.inst_tree.tag_configure("stub", foreground="gray")
         self.update_space_usage()
 
     def select_all_installers(self):
         for item in self.inst_tree.get_children():
             tags = self.inst_tree.item(item, "tags")
+            # Only select if not stub. Remote is fine.
             if "stub" not in tags:
                 self.inst_tree.set(item, "Select", "☑")
         self.update_space_usage()
@@ -926,41 +1123,155 @@ class MultiBootGUI:
 
     def start_creation(self):
         selected_items = self.get_selected_installers()
-        if not selected_items:
-            messagebox.showwarning("Warning", "Select an installer.")
-            return
+        if not selected_items: return
+
         disk_str = self.selected_disk.get()
         if not disk_str: return
         try: disk_id = disk_str.split('(')[1].split(')')[0]
         except: return
 
         target_installers = []
+        download_list = []
+
         for item_id in selected_items:
             values = self.inst_tree.item(item_id)['values']
-            name = values[1]
-            version = str(values[2])
-            buffer_val = float(values[4].split()[0])
+            buffer_val = float(values[5].split()[0])
             found = None
-            for inst in self.installers_list:
-                if inst['name'] == name and str(inst['version']) == version:
-                    found = inst.copy()
-                    found['buffer_gb'] = buffer_val
-                    break
-            if found: target_installers.append(found)
-        if not target_installers: return
 
-        if self.update_mode_var.get():
-            if messagebox.askyesno("Confirm Update", f"Update {disk_id}?\n\nThis will look for free space or existing partitions to replace.\nEXISTING INSTALLERS (NOT SELECTED) WILL NOT BE ERASED."):
-                self.log("Starting Update Process...")
-                self.create_btn.config(state="disabled")
-                self.is_working = True
-                threading.Thread(target=self.run_update_thread, args=(disk_id, target_installers)).start()
-        else:
-            if messagebox.askyesno("Confirm Erase", f"Erase {disk_id} and install {len(target_installers)} macOS versions?\n\nALL DATA WILL BE LOST."):
-                self.log("Starting Creation Process...")
-                self.create_btn.config(state="disabled")
-                self.is_working = True
-                threading.Thread(target=self.run_creation_thread, args=(disk_id, target_installers)).start()
+            tags = self.inst_tree.item(item_id, "tags")
+            if tags and tags[0].isdigit():
+                idx = int(tags[0])
+                if idx < len(self.installers_list):
+                    found = self.installers_list[idx].copy()
+                    found['buffer_gb'] = buffer_val
+
+            if found:
+                target_installers.append(found)
+                if found.get('source') == 'remote':
+                    download_list.append(found)
+
+        if download_list and not self.auto_dl_var.get():
+            messagebox.showwarning("Missing Installers", "You have selected remote installers but auto-download is disabled.")
+            return
+
+        self.show_preflight_dialog(disk_id, target_installers, download_list)
+
+    def show_preflight_dialog(self, disk_id, installers, download_list):
+        top = tk.Toplevel(self.root)
+        top.title("Pre-Flight Summary")
+        top.geometry("600x500")
+
+        ttk.Label(top, text="Ready to prepare your multi-boot USB", font=("Arial", 14, "bold")).pack(pady=10)
+
+        # Summary
+        summary_frame = ttk.LabelFrame(top, text="Plan of Action")
+        summary_frame.pack(fill="both", expand=True, padx=10, pady=5)
+
+        text_area = tk.Text(summary_frame, height=15, width=60, font=("Arial", 11))
+        text_area.pack(fill="both", expand=True, padx=5, pady=5)
+
+        summary = []
+        summary.append(f"Target Disk: {disk_id}")
+        summary.append(f"Mode: {self.mode_var.get().upper()}")
+        summary.append("-" * 40)
+
+        if download_list:
+            total_dl = sum(i['size_kb'] for i in download_list) / (1024*1024)
+            summary.append(f"📥 Download: {len(download_list)} installers ({total_dl:.1f} GB)")
+            for dl in download_list:
+                summary.append(f"   • {dl['name']} {dl['version']}")
+            summary.append("")
+
+        summary.append(f"💾 Installation: {len(installers)} versions")
+        for inst in installers:
+            action = "Install"
+            if inst.get('source') == 'remote': action = "Download & Install"
+            summary.append(f"   • {inst['name']} {inst['version']} ({action})")
+
+        if self.mode_var.get() == "create":
+            summary.append("\n⚠️ WARNING: DISK WILL BE COMPLETELY ERASED!")
+
+        text_area.insert("end", "\n".join(summary))
+        text_area.config(state="disabled")
+
+        btn_frame = ttk.Frame(top)
+        btn_frame.pack(fill="x", pady=10)
+
+        def on_confirm():
+            top.destroy()
+            self.run_full_process(disk_id, installers, download_list)
+
+        ttk.Button(btn_frame, text="Cancel", command=top.destroy).pack(side="right", padx=10)
+        ttk.Button(btn_frame, text="PROCEED", command=on_confirm).pack(side="right", padx=10)
+
+    def run_full_process(self, disk_id, installers, download_list):
+        self.create_btn.config(state="disabled")
+        self.is_working = True
+
+        def process_thread():
+            # 1. Download Phase
+            if download_list:
+                self.log("=== Phase 1: Downloading Missing Installers ===")
+                items_to_dl = []
+                for d in download_list:
+                    items_to_dl.append((d.get('identifier'), d['name']))
+
+                # Use existing logic but synchronously here
+                self.run_download_process_sync(items_to_dl)
+
+                # Re-scan to update paths?
+                # Actually, run_download_process updates scanner.
+                # But we have 'installers' list with OLD paths (None).
+                # We need to refresh 'installers' paths.
+                self.log("Refreshing installer paths...")
+                new_scan = installer_scanner.scan_for_installers()
+                for inst in installers:
+                    if inst['source'] == 'remote':
+                        # Find matching local
+                        for local in new_scan:
+                            if local['name'] == inst['name'] and str(local['version']) == str(inst['version']):
+                                inst['path'] = local['path']
+                                inst['source'] = 'local'
+                                break
+                        if not inst.get('path'):
+                            self.log(f"❌ Failed to verify download for {inst['name']}")
+                            self.is_working = False
+                            self.root.after(0, lambda: self.create_btn.config(state="normal"))
+                            return
+
+            # 2. Creation/Update Phase
+            self.log(f"=== Phase 2: {self.mode_var.get().upper()} Process ===")
+            if self.mode_var.get() == "update":
+                self.run_update_thread_logic(disk_id, installers)
+            else:
+                self.run_creation_thread_logic(disk_id, installers)
+
+        threading.Thread(target=process_thread).start()
+
+    def run_download_process_sync(self, items):
+        # Synchronous version of run_download_process logic
+        try:
+            for identifier, name in items:
+                self.log(f"Downloading {name}...")
+                success = False
+                if identifier:
+                    if mist_downloader.download_installer_by_identifier(identifier, name):
+                         success = True
+                if not success:
+                    self.log(f"ID download failed, retrying with name '{name}'...")
+                    if mist_downloader.download_installer([name]): success = True
+
+                if success: self.log(f"✓ Downloaded {name}")
+                else: self.log(f"❌ Download failed for {name}")
+        except Exception as e:
+            self.log(f"Download error: {e}")
+
+    # Logic Wrappers
+    def run_update_thread_logic(self, disk_id, installers):
+        self.run_update_thread(disk_id, installers)
+
+    def run_creation_thread_logic(self, disk_id, installers):
+        self.run_creation_thread(disk_id, installers)
 
     def run_update_thread(self, disk_id, installers):
         try:
