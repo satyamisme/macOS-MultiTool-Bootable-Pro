@@ -20,6 +20,13 @@ from core import privilege, constants, config_manager
 from operations import partitioner, installer_runner, branding, updater
 from integration import mist_downloader
 
+# Import modular components
+from ui.components.disk_selector import DiskSelector
+from ui.components.installer_tree import InstallerTree
+from ui.components.status_panel import StatusPanel
+from ui.components.action_panel import ActionPanel
+from ui.components.visualization_canvas import VisualizationCanvas
+
 class MultiBootGUI:
     def __init__(self, root, config=None):
         self.root = root
@@ -116,26 +123,14 @@ class MultiBootGUI:
         paned.add(top_frame, weight=1)
 
         # Left: Disk Selection
-        disk_frame = ttk.LabelFrame(top_frame, text="1. Select Target USB Drive")
-        disk_frame.pack(fill="x", padx=5, pady=5)
-
-        self.disk_combo = ttk.Combobox(disk_frame, textvariable=self.selected_disk, state="readonly", width=60)
-        self.disk_combo.pack(fill="x", padx=10, pady=10)
-        self.disk_combo.bind("<<ComboboxSelected>>", self.on_disk_selected)
-
-        # Options Frame (Mode Switch)
-        opt_frame = ttk.Frame(disk_frame)
-        opt_frame.pack(fill="x", padx=10, pady=5)
-
-        ttk.Checkbutton(opt_frame, text="Show All Disks (Advanced)",
-                        variable=self.show_all_disks_var,
-                        command=self.refresh_hardware).pack(side="left")
-
-        # Mode Selection (Auto-Detected)
-        self.mode_label = ttk.Label(opt_frame, text="Mode: Select Disk", font=("Arial", 10, "bold"))
-        self.mode_label.pack(side="left", padx=(20, 5))
-
-        ttk.Button(opt_frame, text="Change...", width=8, command=self.manual_mode_change).pack(side="left", padx=5)
+        self.disk_selector = DiskSelector(
+            top_frame,
+            on_disk_selected=self.on_disk_selected,
+            show_all_var=self.show_all_disks_var,
+            refresh_command=self.refresh_hardware
+        )
+        self.disk_selector.pack(fill="x", padx=5, pady=5)
+        self.disk_selector.change_mode_btn.config(command=self.manual_mode_change)
 
         # Existing Content Panel (Visible in Update Mode)
         self.content_frame = ttk.LabelFrame(top_frame, text="Existing Drive Content")
@@ -157,65 +152,23 @@ class MultiBootGUI:
         ttk.Button(cbtn_frame, text="Scan Content", command=lambda: self.on_disk_selected(None)).pack(fill="x", pady=2)
 
         # Middle: Installer Selection
-        inst_frame = ttk.LabelFrame(top_frame, text="2. Select macOS Installers (To Add/Update)")
-        inst_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.installer_tree_frame = InstallerTree(
+            top_frame,
+            on_click=self.on_tree_click,
+            on_double_click=self.on_tree_double_click,
+            on_right_click=self.show_context_menu,
+            apply_filter_command=self.apply_filter
+        )
+        self.installer_tree_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        self.inst_tree = self.installer_tree_frame.tree
+        self.filter_var = self.installer_tree_frame.filter_var
+        self.search_var = self.installer_tree_frame.search_var
 
-        # Filter Bar
-        filter_frame = ttk.Frame(inst_frame)
-        filter_frame.pack(fill="x", padx=5, pady=2)
-
-        ttk.Label(filter_frame, text="Show:").pack(side="left", padx=2)
-        self.filter_var = tk.StringVar(value="all")
-        ttk.Radiobutton(filter_frame, text="All", variable=self.filter_var, value="all", command=self.apply_filter).pack(side="left", padx=2)
-        ttk.Radiobutton(filter_frame, text="Local Only", variable=self.filter_var, value="local", command=self.apply_filter).pack(side="left", padx=2)
-        ttk.Radiobutton(filter_frame, text="Remote Only", variable=self.filter_var, value="remote", command=self.apply_filter).pack(side="left", padx=2)
-
-        ttk.Label(filter_frame, text="Search:").pack(side="left", padx=(20, 2))
-        self.search_var = tk.StringVar()
-        self.search_var.trace("w", lambda *args: self.apply_filter())
-        ttk.Entry(filter_frame, textvariable=self.search_var, width=20).pack(side="left", padx=2)
-
-        # Tree
-        cols = ("Select", "Name", "Version", "Build", "Size", "Buffer", "Source", "Status")
-        self.inst_tree = ttk.Treeview(inst_frame, columns=cols, show="headings", selectmode="extended", height=10)
-
-        self.inst_tree.heading("Select", text="[x]")
-        self.inst_tree.column("Select", width=40, anchor="center")
-        self.inst_tree.heading("Name", text="Name")
-        self.inst_tree.column("Name", width=220)
-        self.inst_tree.heading("Version", text="Version")
-        self.inst_tree.column("Version", width=70)
-        self.inst_tree.heading("Build", text="Build")
-        self.inst_tree.column("Build", width=60)
-        self.inst_tree.heading("Size", text="Size")
-        self.inst_tree.column("Size", width=70)
-        self.inst_tree.heading("Buffer", text="Buffer")
-        self.inst_tree.column("Buffer", width=60)
-        self.inst_tree.heading("Source", text="Source")
-        self.inst_tree.column("Source", width=60, anchor="center")
-        self.inst_tree.heading("Status", text="Status")
-        self.inst_tree.column("Status", width=100)
-
-        self.inst_tree.pack(side="left", fill="both", expand=True, padx=5, pady=5)
-        self.inst_tree.bind("<Button-1>", self.on_tree_click)
-        self.inst_tree.bind("<Double-1>", self.on_tree_double_click)
-
-        scrollbar = ttk.Scrollbar(inst_frame, orient="vertical", command=self.inst_tree.yview)
-        scrollbar.pack(side="right", fill="y")
-        self.inst_tree.configure(yscrollcommand=scrollbar.set)
-
-        self.context_menu = tk.Menu(self.inst_tree, tearoff=0)
-        self.context_menu.add_command(label="Edit Buffer Size", command=self.edit_selected_buffer)
-        self.context_menu.add_separator()
-        self.context_menu.add_command(label="Delete Local Installer", command=self.delete_selected_installer)
-        self.inst_tree.bind("<Button-3>", self.show_context_menu)
-
-        btn_frame = ttk.Frame(inst_frame)
-        btn_frame.pack(side="bottom", fill="x", padx=5, pady=5)
-        ttk.Button(btn_frame, text="Select All", command=self.select_all_installers).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="Unselect All", command=self.deselect_all_installers).pack(side="left", padx=2)
-        ttk.Button(btn_frame, text="Delete Local", command=self.delete_selected_installer).pack(side="left", padx=20)
-        ttk.Button(btn_frame, text="Refresh List", command=self.scan_installers).pack(side="right", padx=2)
+        # Bind Installer Tree Buttons
+        self.installer_tree_frame.select_all_btn.config(command=self.select_all_installers)
+        self.installer_tree_frame.unselect_all_btn.config(command=self.deselect_all_installers)
+        self.installer_tree_frame.delete_local_btn.config(command=self.delete_selected_installer)
+        self.installer_tree_frame.refresh_btn.config(command=self.scan_installers)
 
         # Bottom Section
         bottom_frame = ttk.Frame(paned)
@@ -254,18 +207,17 @@ class MultiBootGUI:
         self.space_label = ttk.Label(settings_frame, text="Required: 0.0 GB | Available: 0.0 GB | Select Installers & Disk", font=("Arial", 10, "bold"))
         self.space_label.pack(fill="x", padx=10, pady=10)
 
-        self.viz_canvas = tk.Canvas(settings_frame, height=35, bg="#ecf0f1")
+        self.viz_canvas = VisualizationCanvas(settings_frame, self.on_viz_click)
         self.viz_canvas.pack(fill="x", padx=10, pady=5)
-        self.viz_canvas.bind("<Button-1>", self.on_viz_click)
 
-        self.create_btn = ttk.Button(bottom_frame, text="CREATE BOOTABLE USB", command=self.start_creation)
-        self.create_btn.pack(fill="x", padx=20, pady=10)
+        # Action Panel
+        self.action_panel = ActionPanel(bottom_frame, self.start_creation)
+        self.action_panel.pack(fill="x")
+        self.create_btn = self.action_panel.create_btn
 
-        log_frame = ttk.LabelFrame(bottom_frame, text="Progress Log")
-        log_frame.pack(fill="both", expand=True, padx=5, pady=5)
-
-        self.log_text = scrolledtext.ScrolledText(log_frame, height=10, state="disabled", font=("Consolas", 10))
-        self.log_text.pack(fill="both", expand=True, padx=5, pady=5)
+        # Status Panel
+        self.status_panel = StatusPanel(bottom_frame)
+        self.status_panel.pack(fill="both", expand=True, padx=5, pady=5)
 
     # --- Event Handlers ---
 
@@ -411,10 +363,7 @@ class MultiBootGUI:
         try:
             while True:
                 msg = self.log_queue.get_nowait()
-                self.log_text.config(state="normal")
-                self.log_text.insert("end", str(msg) + "\n")
-                self.log_text.see("end")
-                self.log_text.config(state="disabled")
+                self.status_panel.log(msg)
         except queue.Empty:
             pass
         self.root.after(100, self.poll_log_queue)
@@ -740,43 +689,7 @@ class MultiBootGUI:
         else:
             self.dl_size_label.config(text="")
 
-        self.draw_viz(segments, available_gb * 1024 if is_update else available_gb * 1024)
-
-    def draw_viz(self, segments, total_capacity_mb):
-        self.viz_canvas.delete("all")
-        # Save segments for click handler
-        self.viz_segments = segments
-
-        if total_capacity_mb <= 0: return
-        w = self.viz_canvas.winfo_width()
-        h = self.viz_canvas.winfo_height()
-        if w < 10: w = 900
-        current_x = 0
-
-        total_seg_size = sum(s['size'] for s in segments)
-        render_max = max(total_capacity_mb, total_seg_size)
-        scale = w / render_max if render_max > 0 else 1
-
-        for i, seg in enumerate(segments):
-            width = seg["size"] * scale
-            outline = seg.get("outline", "white")
-            tag_id = f"seg_{i}"
-
-            self.viz_canvas.create_rectangle(
-                current_x, 0, current_x + width, h,
-                fill=seg["color"], outline=outline, width=1,
-                tags=(tag_id, "segment")
-            )
-
-            if width > 40:
-                name_short = seg['name'][:15]
-                text_color = "black" if seg["color"] in ["white", "#ecf0f1", "#bdc3c7", "#50e3c2"] else "white"
-                self.viz_canvas.create_text(
-                    current_x + width/2, h/2,
-                    text=name_short, fill=text_color, font=("Arial", 9, "bold"),
-                    tags=(tag_id, "segment")
-                )
-            current_x += width
+        self.viz_canvas.draw_segments(segments, available_gb * 1024 if is_update else available_gb * 1024)
 
     def on_viz_click(self, event):
         x = self.viz_canvas.canvasx(event.x)
@@ -784,20 +697,25 @@ class MultiBootGUI:
         item = self.viz_canvas.find_closest(x, y)
         tags = self.viz_canvas.gettags(item)
 
+        # Access segments from the canvas component
+        segments = self.viz_canvas.viz_segments
+
         for tag in tags:
             if tag.startswith("seg_"):
                 idx = int(tag.split("_")[1])
-                if 0 <= idx < len(self.viz_segments):
-                    seg = self.viz_segments[idx]
+                if 0 <= idx < len(segments):
+                    seg = segments[idx]
                     installer_item = seg.get('installer_item')
                     if installer_item:
                         self.inst_tree.selection_set(installer_item)
                         self.inst_tree.see(installer_item)
                         self.inst_tree.focus(installer_item)
+                        # Open buffer editor on click if it's a new item
+                        if seg.get('type') == 'new' or seg.get('type') == 'replacing':
+                             self.edit_selected_buffer(installer_item)
                     elif seg.get('type') == 'existing':
                         # Highlight in content tree
                         part_id = seg.get('id')
-                        # Find item in content tree with this tag
                         for child in self.content_tree.get_children():
                             if part_id in self.content_tree.item(child, 'tags'):
                                 self.content_tree.selection_set(child)
@@ -1250,19 +1168,33 @@ class MultiBootGUI:
 
     def run_download_process_sync(self, items):
         # Synchronous version of run_download_process logic
+        self.status_panel.set_phase("Downloading")
         try:
-            for identifier, name in items:
-                self.log(f"Downloading {name}...")
+            total_items = len(items)
+            for idx, (identifier, name) in enumerate(items):
+                self.log(f"Downloading {name} ({idx+1}/{total_items})...")
                 success = False
+
+                def progress_cb(percent, msg):
+                    # Update status panel progress bar
+                    self.status_panel.main_progress['value'] = percent
+                    self.status_panel.status_label.config(text=msg)
+                    self.root.update_idletasks()
+
                 if identifier:
-                    if mist_downloader.download_installer_by_identifier(identifier, name):
+                    if mist_downloader.download_installer_by_identifier(identifier, name, progress_callback=progress_cb):
                          success = True
+
                 if not success:
                     self.log(f"ID download failed, retrying with name '{name}'...")
                     if mist_downloader.download_installer([name]): success = True
 
                 if success: self.log(f"✓ Downloaded {name}")
                 else: self.log(f"❌ Download failed for {name}")
+
+            self.status_panel.main_progress['value'] = 0
+            self.status_panel.status_label.config(text="Downloads Complete")
+
         except Exception as e:
             self.log(f"Download error: {e}")
 

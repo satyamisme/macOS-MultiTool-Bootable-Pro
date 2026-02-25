@@ -105,7 +105,7 @@ def list_installers(search_term=None):
         print(f"Error listing installers: {e}")
         return []
 
-def download_installer_by_identifier(identifier, name_for_log="Installer"):
+def download_installer_by_identifier(identifier, name_for_log="Installer", progress_callback=None):
     """
     Download a specific installer by its Mist Identifier (e.g., "093-22004").
     This ensures we get the EXACT build/version selected.
@@ -127,13 +127,40 @@ def download_installer_by_identifier(identifier, name_for_log="Installer"):
 
     print(f"DEBUG: Running command: {' '.join(cmd)}")
 
-    result = subprocess.run(cmd)
+    # Run with realtime output capture for progress parsing
+    try:
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True
+        )
 
-    if result.returncode != 0:
-        print(f"❌ Mist download failed for ID {identifier}.")
+        for line in process.stdout:
+            # Mist output format: "Downloading... 12.5%" or similar
+            # We need to adapt based on actual Mist output which is often a progress bar
+            print(line, end='') # Echo to console
+
+            if progress_callback:
+                # Basic percentage parsing logic
+                if "%" in line:
+                    try:
+                        # Extract percentage using regex or simple split
+                        import re
+                        match = re.search(r'(\d{1,3}\.?\d?)%', line)
+                        if match:
+                            val = float(match.group(1))
+                            progress_callback(val, f"Downloading {name_for_log}: {val:.1f}%")
+                    except: pass
+
+        process.wait()
+        return process.returncode == 0
+
+    except Exception as e:
+        print(f"Error running mist: {e}")
         return False
-
-    return True
 
 def download_installer(os_names, version=None):
     """
