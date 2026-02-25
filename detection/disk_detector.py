@@ -103,11 +103,17 @@ def get_external_usb_drives(show_all=False):
                 continue
 
         print(f"DEBUG: Accepted {disk_id}")
+
+        # Determine media type (SSD/HDD)
+        media_type = "HDD"
+        if disk_info.get('SolidState', False): media_type = "SSD"
+
         usb_drives.append({
             'id': disk_id,
             'name': disk_info.get('MediaName', 'Unknown'),
             'size_gb': disk_info.get('TotalSize', 0) / 1e9,
             'protocol': disk_info.get('BusProtocol', 'Unknown'),
+            'media_type': media_type,
             'removable': disk_info.get('Removable', False),
             'internal': disk_info.get('Internal', False)
         })
