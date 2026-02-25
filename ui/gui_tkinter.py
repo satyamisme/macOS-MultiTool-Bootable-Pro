@@ -411,10 +411,10 @@ class MultiBootGUI:
             existing = structure.get('existing_partitions', [])
             if existing:
                 self.mode_var.set("update")
-                self.root.after(0, lambda: self.mode_label.config(text="Mode: Update Existing (Safe)", foreground="blue"))
+                self.root.after(0, lambda: self.disk_selector.mode_label.config(text="Mode: Update Existing (Safe)", foreground="blue"))
             else:
                 self.mode_var.set("create")
-                self.root.after(0, lambda: self.mode_label.config(text="Mode: Create New (Erase)", foreground="red"))
+                self.root.after(0, lambda: self.disk_selector.mode_label.config(text="Mode: Create New (Erase)", foreground="red"))
 
             self.root.after(0, self.on_mode_change)
             self.root.after(0, lambda: self.update_content_ui(structure))
@@ -425,11 +425,11 @@ class MultiBootGUI:
         if curr == "create":
             if messagebox.askyesno("Switch Mode", "Switch to Update Mode?\n\nThis will try to preserve existing data."):
                 self.mode_var.set("update")
-                self.mode_label.config(text="Mode: Update Existing (Forced)", foreground="blue")
+                self.disk_selector.mode_label.config(text="Mode: Update Existing (Forced)", foreground="blue")
         else:
             if messagebox.askyesno("Switch Mode", "Switch to Create Mode?\n\nWARNING: This will ERASE the entire disk!"):
                 self.mode_var.set("create")
-                self.mode_label.config(text="Mode: Create New (Erase Forced)", foreground="red")
+                self.disk_selector.mode_label.config(text="Mode: Create New (Erase Forced)", foreground="red")
         self.on_mode_change()
 
     def update_content_ui(self, structure):
