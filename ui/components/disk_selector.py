@@ -37,9 +37,28 @@ class DiskSelector(ttk.LabelFrame):
             self.on_disk_selected(event)
 
     def update_disks(self):
+        # Set loading state
+        self.disk_combo.set("Scanning for drives...")
+        self.disk_combo['values'] = ["Scanning..."]
+        self.disk_combo.config(state="disabled")
+
+        import threading
+        threading.Thread(target=self._scan_thread, daemon=True).start()
+
+    def _scan_thread(self):
         try:
             show_all = self.show_all_var.get()
+            # This is the blocking call
             drives = disk_detector.get_external_usb_drives(show_all=show_all)
+            # Schedule UI update on main thread
+            self.after(0, self._update_ui, drives)
+        except Exception as e:
+            print(f"Error scanning drives: {e}")
+            self.after(0, self._update_ui, [])
+
+    def _update_ui(self, drives):
+        try:
+            self.disk_combo.config(state="readonly")
             options = []
             if drives:
                 for d in drives:
@@ -54,14 +73,13 @@ class DiskSelector(ttk.LabelFrame):
                 self.disk_combo['values'] = options
                 if options: self.disk_combo.current(0)
                 self.on_select(None)
-                return len(drives)
             else:
                 self.disk_combo['values'] = ["No external USB drives found"]
                 self.disk_combo.set("No external USB drives found")
-                return 0
+                # Ensure we trigger on_select to clear dependent UI if needed
+                self.on_select(None)
         except Exception as e:
-            print(f"Error scanning drives: {e}")
-            return 0
+            print(f"Error updating UI: {e}")
 
     def get_selected_id(self):
         val = self.selected_disk.get()

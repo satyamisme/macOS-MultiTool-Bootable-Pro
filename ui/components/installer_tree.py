@@ -33,7 +33,7 @@ class InstallerTree(ttk.LabelFrame):
         self.tree = ttk.Treeview(self, columns=cols, show="headings", selectmode="extended", height=10)
 
         self.tree.heading("Select", text="[x]")
-        self.tree.column("Select", width=40, anchor="center")
+        self.tree.column("Select", width=50, anchor="center")
         self.tree.heading("Name", text="Name")
         self.tree.column("Name", width=220)
         self.tree.heading("Version", text="Version")
