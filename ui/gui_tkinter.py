@@ -170,6 +170,9 @@ class MultiBootGUI:
         self.installer_tree_frame.delete_local_btn.config(command=self.delete_selected_installer)
         self.installer_tree_frame.refresh_btn.config(command=self.scan_installers)
 
+        # Bind Spacebar to toggle selection
+        self.inst_tree.bind("<space>", self.on_space_press)
+
         # Bottom Section
         bottom_frame = ttk.Frame(paned)
         paned.add(bottom_frame, weight=1)
@@ -317,21 +320,32 @@ class MultiBootGUI:
             if col == "#1":
                 item_id = self.inst_tree.identify_row(event.y)
                 self.toggle_selection(item_id)
-                return "break"
+                # Allow row selection to proceed
+                pass
 
     def on_tree_double_click(self, event):
         item_id = self.inst_tree.identify_row(event.y)
         if item_id:
             self.edit_selected_buffer(item_id)
 
+    def on_space_press(self, event):
+        items = self.inst_tree.selection()
+        if not items: return
+        for item in items:
+            self.toggle_selection(item)
+        return "break"
+
     def toggle_selection(self, item_id):
         if not item_id: return
-        current = self.inst_tree.set(item_id, "Select")
         tags = self.inst_tree.item(item_id, "tags")
         if "stub" in tags:
-            messagebox.showwarning("Invalid", "Cannot select Stub installer.")
-            return
-        new_val = "☑" if current == "☐" else "☐"
+            return # Silent fail for spacebar bulk toggle
+
+        current = self.inst_tree.set(item_id, "Select")
+        # Handle both old chars and new [x] style
+        is_checked = current in ["☑", "[x]"]
+        new_val = "[ ]" if is_checked else "[x]"
+
         self.inst_tree.set(item_id, "Select", new_val)
         self.update_space_usage()
 
@@ -476,7 +490,8 @@ class MultiBootGUI:
     def get_selected_installers(self):
         selected = []
         for item in self.inst_tree.get_children():
-            if self.inst_tree.set(item, "Select") == "☑":
+            val = self.inst_tree.set(item, "Select")
+            if val in ["☑", "[x]"]:
                 selected.append(item)
         return selected
 
@@ -725,23 +740,10 @@ class MultiBootGUI:
 
     def refresh_hardware(self):
         self.log("Scanning hardware...")
-        show_all = self.show_all_disks_var.get()
-        try:
-            drives = disk_detector.get_external_usb_drives(show_all=show_all)
-            options = []
-            if drives:
-                for d in drives:
-                    options.append(f"{d['name']} ({d['id']}) - {d['size_gb']:.1f} GB")
-                self.disk_combo['values'] = options
-                if options: self.disk_combo.current(0)
-                self.log(f"Found {len(drives)} drives.")
-                self.on_disk_selected(None)
-            else:
-                self.disk_combo['values'] = ["No external USB drives found"]
-                self.disk_combo.set("No external USB drives found")
-                self.log("No drives found.")
-        except Exception as e:
-            self.log(f"Error scanning drives: {e}")
+        # Delegate to DiskSelector (Async)
+        self.disk_selector.update_disks()
+
+        # Scan installers (Async)
         self.scan_installers()
         self.update_space_usage()
 
@@ -853,7 +855,7 @@ class MultiBootGUI:
             buf = self.custom_buffers.get(key, default_buffer)
 
             values = (
-                "☐",
+                "[ ]",
                 inst['name'],
                 inst['version'],
                 inst.get('build', ''),
@@ -884,12 +886,12 @@ class MultiBootGUI:
             tags = self.inst_tree.item(item, "tags")
             # Only select if not stub. Remote is fine.
             if "stub" not in tags:
-                self.inst_tree.set(item, "Select", "☑")
+                self.inst_tree.set(item, "Select", "[x]")
         self.update_space_usage()
 
     def deselect_all_installers(self):
         for item in self.inst_tree.get_children():
-            self.inst_tree.set(item, "Select", "☐")
+            self.inst_tree.set(item, "Select", "[ ]")
         self.update_space_usage()
 
     def show_context_menu(self, event):
@@ -957,8 +959,11 @@ class MultiBootGUI:
             if region == "cell" and tree.identify_column(event.x) == "#1":
                 item = tree.identify_row(event.y)
                 curr = tree.set(item, "Select")
-                tree.set(item, "Select", "☑" if curr == "☐" else "☐")
-                return "break"
+                is_checked = curr in ["☑", "[x]"]
+                tree.set(item, "Select", "[ ]" if is_checked else "[x]")
+                # Allow default selection
+                pass
+
         tree.bind("<Button-1>", on_dl_click)
         for item in data:
             size_gb = f"{item.get('size', 0) / (1024**3):.1f} GB"
@@ -967,7 +972,7 @@ class MultiBootGUI:
             if item.get('latest'): status_flags.append("Latest")
             status_str = ", ".join(status_flags)
             item_id = tree.insert("", "end", values=(
-                "☐", item.get('name'), item.get('version'), item.get('build'), size_gb, item.get('date'), status_str
+                "[ ]", item.get('name'), item.get('version'), item.get('build'), size_gb, item.get('date'), status_str
             ))
             if item.get('latest'): tree.item(item_id, tags=("latest",))
             if item.get('downloaded'): tree.item(item_id, tags=("installed",))
@@ -976,7 +981,8 @@ class MultiBootGUI:
         def do_download():
             selected_items = []
             for item in tree.get_children():
-                if tree.set(item, "Select") == "☑":
+                val = tree.set(item, "Select")
+                if val in ["☑", "[x]"]:
                     vals = tree.item(item)['values']
                     name = vals[1]
                     version = str(vals[2])

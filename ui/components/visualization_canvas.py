@@ -1,6 +1,5 @@
 import tkinter as tk
 from tkinter import ttk
-from ui.components.tooltip import Tooltip
 
 class VisualizationCanvas(tk.Canvas):
     def __init__(self, parent, on_click_command, height=35):
@@ -9,17 +8,16 @@ class VisualizationCanvas(tk.Canvas):
         self.bind("<Motion>", self.on_hover)
         self.on_click_command = on_click_command
         self.viz_segments = []
-        self.tooltips = {} # tag_id -> tooltip object
 
     def draw_segments(self, segments, total_capacity_mb):
         self.delete("all")
         self.viz_segments = segments
-        self.tooltips = {} # Clear tooltips
 
         if total_capacity_mb <= 0: return
         w = self.winfo_width()
         h = self.winfo_height()
         if w < 10: w = 900
+        if h < 10: h = int(self.cget("height"))
 
         current_x = 0
         total_seg_size = sum(s['size'] for s in segments)
