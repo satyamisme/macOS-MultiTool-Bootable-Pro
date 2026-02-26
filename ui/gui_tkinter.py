@@ -306,7 +306,8 @@ class MultiBootGUI:
         mode = self.mode_var.get()
         if mode == "update":
             self.create_btn.config(text="UPDATE EXISTING USB")
-            self.content_frame.pack(fill="both", expand=True, padx=5, pady=5, after=self.disk_combo.master)
+            # Pack after the disk_selector frame
+            self.content_frame.pack(fill="both", expand=True, padx=5, pady=5, after=self.disk_selector)
             self.on_disk_selected(None)
         else:
             self.create_btn.config(text="CREATE BOOTABLE USB (Erase All)")
@@ -316,12 +317,10 @@ class MultiBootGUI:
     def on_tree_click(self, event):
         region = self.inst_tree.identify("region", event.x, event.y)
         if region == "cell":
-            col = self.inst_tree.identify_column(event.x)
-            if col == "#1":
-                item_id = self.inst_tree.identify_row(event.y)
+            # Toggle selection on row click (any column)
+            item_id = self.inst_tree.identify_row(event.y)
+            if item_id:
                 self.toggle_selection(item_id)
-                # Allow row selection to proceed
-                pass
 
     def on_tree_double_click(self, event):
         item_id = self.inst_tree.identify_row(event.y)
@@ -411,10 +410,12 @@ class MultiBootGUI:
             existing = structure.get('existing_partitions', [])
             if existing:
                 self.mode_var.set("update")
-                self.root.after(0, lambda: self.disk_selector.mode_label.config(text="Mode: Update Existing (Safe)", foreground="blue"))
+                self.root.after(0, lambda: self.disk_selector.mode_label.config(
+                    text="MODE: UPDATE EXISTING (Safe)", foreground="white", background="#2980b9", padding=(5, 2)))
             else:
                 self.mode_var.set("create")
-                self.root.after(0, lambda: self.disk_selector.mode_label.config(text="Mode: Create New (Erase)", foreground="red"))
+                self.root.after(0, lambda: self.disk_selector.mode_label.config(
+                    text="MODE: CREATE NEW (Erase)", foreground="white", background="#c0392b", padding=(5, 2)))
 
             self.root.after(0, self.on_mode_change)
             self.root.after(0, lambda: self.update_content_ui(structure))
@@ -425,11 +426,13 @@ class MultiBootGUI:
         if curr == "create":
             if messagebox.askyesno("Switch Mode", "Switch to Update Mode?\n\nThis will try to preserve existing data."):
                 self.mode_var.set("update")
-                self.disk_selector.mode_label.config(text="Mode: Update Existing (Forced)", foreground="blue")
+                self.disk_selector.mode_label.config(
+                    text="MODE: UPDATE EXISTING (Forced)", foreground="white", background="#2980b9", padding=(5, 2))
         else:
             if messagebox.askyesno("Switch Mode", "Switch to Create Mode?\n\nWARNING: This will ERASE the entire disk!"):
                 self.mode_var.set("create")
-                self.disk_selector.mode_label.config(text="Mode: Create New (Erase Forced)", foreground="red")
+                self.disk_selector.mode_label.config(
+                    text="MODE: CREATE NEW (Erase Forced)", foreground="white", background="#c0392b", padding=(5, 2))
         self.on_mode_change()
 
     def update_content_ui(self, structure):
@@ -873,12 +876,23 @@ class MultiBootGUI:
             # Let's store index in tags
             self.inst_tree.item(item_id, tags=(str(self.installers_list.index(inst)),))
 
-            if inst.get('is_stub'):
-                self.inst_tree.item(item_id, tags=(str(self.installers_list.index(inst)), "stub"))
+            tags = [str(self.installers_list.index(inst))]
 
+            if inst.get('source') == 'local':
+                tags.append("local")
+            else:
+                tags.append("remote")
+
+            if inst.get('is_stub'):
+                tags.append("stub")
+
+            self.inst_tree.item(item_id, tags=tuple(tags))
             count += 1
 
-        self.inst_tree.tag_configure("stub", foreground="gray")
+        # Configure Visual Styles
+        self.inst_tree.tag_configure("local", font=("TkDefaultFont", 10, "bold"), foreground="black")
+        self.inst_tree.tag_configure("remote", foreground="#555555")
+        self.inst_tree.tag_configure("stub", foreground="gray", font=("TkDefaultFont", 10, "italic"))
         self.update_space_usage()
 
     def select_all_installers(self):
