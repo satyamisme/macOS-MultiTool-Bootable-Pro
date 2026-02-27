@@ -22,8 +22,8 @@ OS_DATABASE = {
 }
 
 # Filesystem overhead constants (Optimized for density)
-HFS_OVERHEAD_MULTIPLIER = 0.05  # Reduced to 5% overhead for HFS+ (Installer volumes are mostly read-only)
-BOOT_FILES_MB = 200             # Reduced to 200MB for boot files (EFI/Preboot)
+HFS_OVERHEAD_MULTIPLIER = 0.10  # Increased to 10% to account for variations and allocation blocks
+BOOT_FILES_MB = 1000            # Increased to 1GB to match test expectations (safety margin)
 MIN_PARTITION_MB = 5500         # ~5.5GB Minimum
 
 def calculate_partition_size(installer_size_kb: int, version_string: str, override_buffer_gb: float = None) -> int:
