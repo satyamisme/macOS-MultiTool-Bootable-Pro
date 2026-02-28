@@ -68,7 +68,8 @@ class TestUpdater(unittest.TestCase):
         self.assertIsNotNone(structure)
         self.assertEqual(structure['disk_size'], 64000000000)
         self.assertEqual(structure['data_partition']['id'], 'disk2s3')
-        self.assertEqual(structure['existing_installers'], ['Install macOS Sonoma'])
+        # Structure uses a dict mapping name -> id
+        self.assertEqual(structure['existing_installers']['Install macOS Sonoma'], 'disk2s2')
 
     @patch('subprocess.check_output')
     @patch('operations.updater.get_drive_structure')
