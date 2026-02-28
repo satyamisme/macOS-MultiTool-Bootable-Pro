@@ -363,11 +363,10 @@ class MultiBootGUI:
 
         self.inst_tree.set(item_id, "Select", new_val)
 
-        # Force a UI update of the treeview to ensure the change is visible
-        self.inst_tree.update_idletasks()
-
-        # Calculate space
-        self.update_space_usage()
+        # Defer space calculation to prevent blocking the UI thread during rapid clicks
+        if hasattr(self, '_update_space_timer'):
+            self.root.after_cancel(self._update_space_timer)
+        self._update_space_timer = self.root.after(100, self.update_space_usage)
 
     def edit_selected_buffer(self, item_id=None):
         if not item_id:
@@ -422,6 +421,7 @@ class MultiBootGUI:
         self.update_space_usage()
 
     def scan_drive_content(self, disk_id):
+        self.log(f"Scanning content of {disk_id}...")
         structure = updater.get_drive_structure(disk_id)
         if structure:
             self.existing_installers_map = structure.get('existing_installers', {})
@@ -436,6 +436,13 @@ class MultiBootGUI:
 
             self.root.after(0, self.on_mode_change)
             self.root.after(0, lambda: self.update_content_ui(structure))
+            self.root.after(0, self.update_space_usage)
+            self.log(f"Found {len(existing)} existing partitions.")
+        else:
+            self.log(f"Failed to read structure for {disk_id}.")
+            self.drive_structure = None
+            self.existing_installers_map = {}
+            self.root.after(0, lambda: self.update_content_ui({'existing_partitions': []}))
             self.root.after(0, self.update_space_usage)
 
     def update_content_ui(self, structure):
