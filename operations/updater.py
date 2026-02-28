@@ -75,8 +75,14 @@ def get_drive_structure(disk_id):
 
         return info
 
+    except subprocess.CalledProcessError as e:
+        print(f"Error scanning drive (subprocess failed): {e}")
+        print(f"Stderr: {e.stderr}")
+        return None
     except Exception as e:
-        print(f"Error scanning drive: {e}")
+        import traceback
+        print(f"Error parsing drive structure: {e}")
+        traceback.print_exc()
         return None
 
 def split_partition(part_id, new_installers):
