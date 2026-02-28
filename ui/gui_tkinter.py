@@ -554,21 +554,24 @@ class MultiBootGUI:
             # Use tags for quick lookup of size
             size_kb = 0
             tags = self.inst_tree.item(item_id, "tags")
-            if tags and tags[0].isdigit():
-                idx = int(tags[0])
-                if idx < len(self.installers_list):
-                    size_kb = self.installers_list[idx]['size_kb']
+
+            # Extract index from tags (it should be the first digit-only tag)
+            for tag in tags:
+                if tag.isdigit():
+                    idx = int(tag)
+                    if 0 <= idx < len(self.installers_list):
+                        size_kb = self.installers_list[idx].get('size_kb', 0)
+                    break
 
             if size_kb == 0:
                 for inst in self.installers_list:
                     if inst['name'] == name and str(inst['version']) == version:
-                        size_kb = inst['size_kb']
+                        size_kb = inst.get('size_kb', 0)
                         break
 
             # Check download requirement
-            # If source is remote (via values[6] which is icon, or logic), add to download
-            # values[6] is Source Icon. ☁️ means remote.
-            if "☁️" in values[6]:
+            # The icon in values[6] can be used, but we can also use tags to verify "remote"
+            if "remote" in tags or "☁️" in str(values[6]):
                 total_download_kb += size_kb
 
             clean_name = name.replace("Install macOS ", "").replace("Install ", "").replace(".app", "")
@@ -1091,16 +1094,23 @@ class MultiBootGUI:
             found = None
 
             tags = self.inst_tree.item(item_id, "tags")
-            if tags and tags[0].isdigit():
-                idx = int(tags[0])
-                if idx < len(self.installers_list):
-                    found = self.installers_list[idx].copy()
-                    found['buffer_gb'] = buffer_val
+            # Safely extract the index from tags
+            for tag in tags:
+                if tag.isdigit():
+                    idx = int(tag)
+                    if 0 <= idx < len(self.installers_list):
+                        found = self.installers_list[idx].copy()
+                        found['buffer_gb'] = buffer_val
+                    break
 
             if found:
                 target_installers.append(found)
                 if found.get('source') == 'remote':
                     download_list.append(found)
+
+        if not target_installers:
+            self.log("Error: Could not extract installer details from selection.")
+            return
 
         if download_list and not self.auto_dl_var.get():
             messagebox.showwarning("Missing Installers", "You have selected remote installers but auto-download is disabled.")

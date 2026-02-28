@@ -53,8 +53,8 @@ def get_drive_structure(disk_id):
                             'id': part_id,
                             'size': part_size
                         }
-                    elif 'Install macOS' in vol_name or 'INSTALL_' in vol_name or 'macOS' in vol_name:
-                        clean_name = vol_name.replace("Install macOS ", "").replace("INSTALL_", "").replace("macOS ", "")
+                    elif vol_name and ('Install' in vol_name or 'macOS' in vol_name or 'OS X' in vol_name):
+                        clean_name = vol_name.replace("Install macOS ", "").replace("INSTALL_", "").replace("macOS ", "").replace("Install OS X ", "")
 
                         # Store flexible keys
                         info['existing_installers'][clean_name] = part_id
