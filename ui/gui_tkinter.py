@@ -40,7 +40,6 @@ class MultiBootGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Variables
-        self.selected_disk = tk.StringVar()
         self.installers_list = []
         self.log_queue = queue.Queue()
         self.is_working = False
@@ -130,6 +129,7 @@ class MultiBootGUI:
             refresh_command=self.refresh_hardware
         )
         self.disk_selector.pack(fill="x", padx=5, pady=5)
+        self.selected_disk = self.disk_selector.selected_disk
 
         # Add explicit Mode Radiobuttons to the Disk Selector's mode_frame
         ttk.Label(self.disk_selector.mode_frame, text="Operation Mode:", font=("Arial", 9, "bold")).pack(side="left", padx=(0, 5))
@@ -271,16 +271,18 @@ class MultiBootGUI:
                              latest_ver = f"{inst['version']} ({inst['build']})"
                              break
 
-                    # Update Treeview
-                    # Find item by tag
-                    for item in self.content_tree.get_children():
-                         item_tags = self.content_tree.item(item, "tags")
-                         if part['id'] in item_tags:
-                             # Update value
-                             curr_vals = self.content_tree.item(item)['values']
-                             # (Name, Size, Latest, Action)
-                             self.content_tree.item(item, values=(curr_vals[0], curr_vals[1], latest_ver, curr_vals[3]))
-                             updates_found += 1
+                    # Update Treeview safely
+                    def update_tree(p_id, l_ver):
+                        for item in self.content_tree.get_children():
+                             item_tags = self.content_tree.item(item, "tags")
+                             if p_id in item_tags:
+                                 # Update value
+                                 curr_vals = self.content_tree.item(item)['values']
+                                 # (Name, Size, Latest, Action)
+                                 self.content_tree.item(item, values=(curr_vals[0], curr_vals[1], l_ver, curr_vals[3]))
+
+                    self.root.after(0, update_tree, part['id'], latest_ver)
+                    updates_found += 1
 
             self.log(f"Update check complete. Checked {updates_found} partitions.")
 
@@ -957,7 +959,7 @@ class MultiBootGUI:
         threading.Thread(target=self.run_mist_search, args=(search,)).start()
 
     def run_mist_search(self, search_term):
-        self.create_btn.config(state="disabled")
+        self.root.after(0, lambda: self.create_btn.config(state="disabled"))
         try:
             if not mist_downloader.check_mist_available():
                 self.log("Mist-CLI missing. Attempting install...")
@@ -1031,7 +1033,7 @@ class MultiBootGUI:
         btn.pack(pady=10)
 
     def run_download_process(self, items):
-        self.create_btn.config(state="disabled")
+        self.root.after(0, lambda: self.create_btn.config(state="disabled"))
         try:
             for identifier, name in items:
                 self.log(f"Downloading {name}...")
@@ -1167,7 +1169,7 @@ class MultiBootGUI:
         ttk.Button(btn_frame, text="PROCEED", command=on_confirm).pack(side="right", padx=10)
 
     def run_full_process(self, disk_id, installers, download_list):
-        self.create_btn.config(state="disabled")
+        self.root.after(0, lambda: self.create_btn.config(state="disabled"))
         self.is_working = True
 
         def process_thread():
@@ -1212,7 +1214,7 @@ class MultiBootGUI:
 
     def run_download_process_sync(self, items):
         # Synchronous version of run_download_process logic
-        self.status_panel.set_phase("Downloading")
+        self.root.after(0, lambda: self.status_panel.set_phase("Downloading"))
         try:
             total_items = len(items)
             for idx, (identifier, name) in enumerate(items):
@@ -1220,10 +1222,12 @@ class MultiBootGUI:
                 success = False
 
                 def progress_cb(percent, msg):
-                    # Update status panel progress bar
-                    self.status_panel.main_progress['value'] = percent
-                    self.status_panel.status_label.config(text=msg)
-                    self.root.update_idletasks()
+                    # Update status panel progress bar safely
+                    def update_ui(p, m):
+                        self.status_panel.main_progress['value'] = p
+                        self.status_panel.status_label.config(text=m)
+                        self.root.update_idletasks()
+                    self.root.after(0, update_ui, percent, msg)
 
                 if identifier:
                     if mist_downloader.download_installer_by_identifier(identifier, name, progress_callback=progress_cb):
@@ -1236,8 +1240,10 @@ class MultiBootGUI:
                 if success: self.log(f"✓ Downloaded {name}")
                 else: self.log(f"❌ Download failed for {name}")
 
-            self.status_panel.main_progress['value'] = 0
-            self.status_panel.status_label.config(text="Downloads Complete")
+            def finish_dl():
+                self.status_panel.main_progress['value'] = 0
+                self.status_panel.status_label.config(text="Downloads Complete")
+            self.root.after(0, finish_dl)
 
         except Exception as e:
             self.log(f"Download error: {e}")
