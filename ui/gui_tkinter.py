@@ -130,7 +130,21 @@ class MultiBootGUI:
             refresh_command=self.refresh_hardware
         )
         self.disk_selector.pack(fill="x", padx=5, pady=5)
-        self.disk_selector.change_mode_btn.config(command=self.manual_mode_change)
+
+        # Add explicit Mode Radiobuttons to the Disk Selector's mode_frame
+        ttk.Label(self.disk_selector.mode_frame, text="Operation Mode:", font=("Arial", 9, "bold")).pack(side="left", padx=(0, 5))
+
+        self.mode_rb_create = ttk.Radiobutton(
+            self.disk_selector.mode_frame, text="Create (Erase All)",
+            variable=self.mode_var, value="create", command=self.on_mode_change
+        )
+        self.mode_rb_create.pack(side="left", padx=5)
+
+        self.mode_rb_update = ttk.Radiobutton(
+            self.disk_selector.mode_frame, text="Update (Keep Data)",
+            variable=self.mode_var, value="update", command=self.on_mode_change
+        )
+        self.mode_rb_update.pack(side="left", padx=5)
 
         # Existing Content Panel (Visible in Update Mode)
         self.content_frame = ttk.LabelFrame(top_frame, text="Existing Drive Content")
@@ -317,9 +331,12 @@ class MultiBootGUI:
     def on_tree_click(self, event):
         region = self.inst_tree.identify("region", event.x, event.y)
         if region == "cell":
-            # Toggle selection on row click (any column)
+            # The click event fires before Treeview updates its selection.
+            # Using after(10) ensures we act on the updated state if needed,
+            # but for simple toggling based on row ID, we can do it immediately.
             item_id = self.inst_tree.identify_row(event.y)
             if item_id:
+                # Toggle selection state
                 self.toggle_selection(item_id)
 
     def on_tree_double_click(self, event):
@@ -341,11 +358,15 @@ class MultiBootGUI:
             return # Silent fail for spacebar bulk toggle
 
         current = self.inst_tree.set(item_id, "Select")
-        # Handle both old chars and new [x] style
-        is_checked = current in ["☑", "[x]"]
+        is_checked = current in ["☑", "[x]", "YES", "✓"]
         new_val = "[ ]" if is_checked else "[x]"
 
         self.inst_tree.set(item_id, "Select", new_val)
+
+        # Force a UI update of the treeview to ensure the change is visible
+        self.inst_tree.update_idletasks()
+
+        # Calculate space
         self.update_space_usage()
 
     def edit_selected_buffer(self, item_id=None):
@@ -410,30 +431,12 @@ class MultiBootGUI:
             existing = structure.get('existing_partitions', [])
             if existing:
                 self.mode_var.set("update")
-                self.root.after(0, lambda: self.disk_selector.mode_label.config(
-                    text="MODE: UPDATE EXISTING (Safe)", foreground="white", background="#2980b9", padding=(5, 2)))
             else:
                 self.mode_var.set("create")
-                self.root.after(0, lambda: self.disk_selector.mode_label.config(
-                    text="MODE: CREATE NEW (Erase)", foreground="white", background="#c0392b", padding=(5, 2)))
 
             self.root.after(0, self.on_mode_change)
             self.root.after(0, lambda: self.update_content_ui(structure))
             self.root.after(0, self.update_space_usage)
-
-    def manual_mode_change(self):
-        curr = self.mode_var.get()
-        if curr == "create":
-            if messagebox.askyesno("Switch Mode", "Switch to Update Mode?\n\nThis will try to preserve existing data."):
-                self.mode_var.set("update")
-                self.disk_selector.mode_label.config(
-                    text="MODE: UPDATE EXISTING (Forced)", foreground="white", background="#2980b9", padding=(5, 2))
-        else:
-            if messagebox.askyesno("Switch Mode", "Switch to Create Mode?\n\nWARNING: This will ERASE the entire disk!"):
-                self.mode_var.set("create")
-                self.disk_selector.mode_label.config(
-                    text="MODE: CREATE NEW (Erase Forced)", foreground="white", background="#c0392b", padding=(5, 2))
-        self.on_mode_change()
 
     def update_content_ui(self, structure):
         for item in self.content_tree.get_children():
@@ -494,7 +497,7 @@ class MultiBootGUI:
         selected = []
         for item in self.inst_tree.get_children():
             val = self.inst_tree.set(item, "Select")
-            if val in ["☑", "[x]"]:
+            if val in ["☑", "[x]", "YES", "✓"]:
                 selected.append(item)
         return selected
 
@@ -685,15 +688,19 @@ class MultiBootGUI:
         if not can_proceed:
             color = "red"
             status_text = f"❌ {error_msg}"
-            self.create_btn.config(state="disabled", text="Cannot Proceed")
+            self.create_btn.config(state="disabled", text="CANNOT PROCEED (Space Issue)")
         else:
             color = "green"
             if not self.is_working and (len(selected_items) > 0):
                 self.create_btn.config(state="normal")
                 # Smart Button Text
-                btn_text = "CREATE BOOTABLE USB"
+                btn_text = "CREATE NEW USB"
                 if is_update: btn_text = "UPDATE EXISTING USB"
-                if total_download_kb > 0: btn_text = "DOWNLOAD & " + btn_text.split(" ")[0] + " USB"
+
+                if total_download_kb > 0:
+                    dl_gb = total_download_kb / (1024*1024)
+                    btn_text = f"DOWNLOAD ({dl_gb:.1f}GB) & {btn_text}"
+
                 self.create_btn.config(text=btn_text)
 
         self.space_label.config(

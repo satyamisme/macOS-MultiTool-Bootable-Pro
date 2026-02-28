@@ -26,11 +26,9 @@ class DiskSelector(ttk.LabelFrame):
                         variable=self.show_all_var,
                         command=self.refresh_command).pack(side="left")
 
-        # Mode Label Placeholder (Managed by parent or ModeManager)
-        self.mode_label = ttk.Label(opt_frame, text="Mode: Select Disk", font=("Arial", 10, "bold"))
-        self.mode_label.pack(side="left", padx=(20, 5))
-        self.change_mode_btn = ttk.Button(opt_frame, text="Change...", width=8)
-        self.change_mode_btn.pack(side="left", padx=5)
+        # Mode Controls will be added by the main GUI
+        self.mode_frame = ttk.Frame(opt_frame)
+        self.mode_frame.pack(side="left", padx=(20, 0))
 
     def on_select(self, event):
         if self.on_disk_selected:
